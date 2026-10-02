@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktop-buddy"
+version = "1.0.0"
+description = "A tiny creature that lives on your Ubuntu desktop"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Desktop Buddy" }]
+dependencies = ["PyQt6>=6.6,<7"]
+
+[project.scripts]
+desktop-buddy = "desktop_buddy.app:main"
+
+[tool.setuptools]
+packages = ["desktop_buddy"]
+
+[tool.setuptools.package-data]
+desktop_buddy = ["assets/*.svg", "assets/*.png"]
