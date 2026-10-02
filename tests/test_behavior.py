@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import unittest
 
-from desktop_buddy.behavior import Brain, Event, State, World
+from desktop_buddy.behavior import Brain, Event, Perch, State, World
 
 
 def make_brain(**kwargs: object) -> Brain:
@@ -112,6 +112,67 @@ class BehaviourTests(unittest.TestCase):
             brain.step(1.0 / 60.0)
             self.assertGreaterEqual(brain.x, brain.world.left + margin - 1.0)
             self.assertLessEqual(brain.x, brain.world.right - margin + 1.0)
+
+    def test_ghost_poke_starts_and_ends_dance(self) -> None:
+        brain = make_brain(can_dance=True)
+        events = brain.poke()
+        self.assertIn(Event.DANCE, events)
+        self.assertIs(brain.state, State.DANCE)
+        for _ in range(int(8.0 * 60)):
+            brain.step(1.0 / 60.0)
+            if brain.state is not State.DANCE:
+                break
+        self.assertIsNot(brain.state, State.DANCE)
+
+    def test_cat_poke_still_jumps(self) -> None:
+        brain = make_brain(can_dance=False)
+        events = brain.poke()
+        self.assertIn(Event.JUMP, events)
+        self.assertNotIn(Event.DANCE, events)
+
+    def test_ghost_floats_down_more_slowly(self) -> None:
+        cat = make_brain()
+        ghost = make_brain(gravity_scale=0.32, max_fall_speed=150.0)
+        for brain in (cat, ghost):
+            brain.state = State.AIR
+            brain.y = 500.0
+            brain.vy = 0.0
+        run(cat, 0.5)
+        run(ghost, 0.5)
+        self.assertLess(ghost.vy, cat.vy)
+        self.assertLess(ghost.y, cat.y)  # smaller y = closer to the ceiling
+
+
+class PerchTests(unittest.TestCase):
+    def test_climbs_to_window_top_and_stays_there(self) -> None:
+        brain = make_brain()
+        perch = Perch(x=300.0, y=300.0, left=200.0, right=800.0, kind="browser")
+        self.assertTrue(brain.set_perch(perch))
+        self.assertIs(brain.state, State.CLIMB)
+        events = run(brain, 20.0)
+        self.assertIn(Event.PERCH, events)
+        self.assertTrue(brain.perched)
+        self.assertAlmostEqual(brain.y, 300.0, delta=1.0)
+        self.assertEqual(brain.world.ground, 300.0)
+        self.assertGreaterEqual(brain.x, brain.world.left + 1.0)
+        self.assertLessEqual(brain.x, brain.world.right - 1.0)
+
+    def test_clear_perch_falls_back_to_screen(self) -> None:
+        brain = make_brain()
+        brain.set_perch(Perch(x=300.0, y=300.0, left=200.0, right=800.0))
+        run(brain, 20.0)
+        events = brain.clear_perch()
+        self.assertIn(Event.DROP, events)
+        self.assertIs(brain.state, State.AIR)
+        run(brain, 10.0)
+        self.assertAlmostEqual(brain.y, 800.0, delta=1.0)
+
+    def test_dragging_cancels_perch(self) -> None:
+        brain = make_brain()
+        brain.set_perch(Perch(x=300.0, y=300.0, left=200.0, right=800.0))
+        brain.start_drag()
+        self.assertIsNone(brain.perch)
+        self.assertFalse(brain.perched)
 
 
 if __name__ == "__main__":

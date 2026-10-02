@@ -1,8 +1,11 @@
-# Desktop Buddy 🐾
+# Desktop Buddy 👻🐾
 
-A tiny creature that lives on your Ubuntu desktop. Mochi walks around, runs,
-jumps, falls, sleeps, watches your cursor and reacts to being poked — while you
-get on with your work.
+Tiny creatures that live on your Ubuntu desktop.
+
+**Boo-ombastic** is a floaty little ghost who drifts around, dances on your
+browser's search bar, hangs out near your terminal prompt, investigates your
+cursor and gets very excited when poked. **Mochi**, the original round
+blob-cat, is still available from the tray menu if you want the classic.
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 
@@ -12,7 +15,16 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 
 - Frameless, transparent, always-on-top window — no taskbar entry, no focus stealing
 - Autonomous behaviour: idle breathing, blinking, looking around, walking, running,
-  jumping (gravity + squash & stretch), landing dust, sleeping with `Zzz`
+  jumping (gravity + squash & stretch), landing dust, dancing, sleeping with `Zzz`
+- **Dance mode**: Boo bobs, sways, sings `♪♫` and throws hearts (double-click,
+  tray → Dance!, or `desktop-buddy dance`)
+- **Window perching**: when you use a browser it climbs onto the window near the
+  address/search bar; with a terminal it settles near the prompt; switch apps and
+  it comes back down (tray → "Perch on browser/terminal" to disable)
+- **Drop it anywhere**: drag the buddy anywhere on the screen — floor, middle of
+  the screen, top edge, on top of another window
+- **Two characters**: Boo-ombastic the ghost (floats, dances) and Mochi the cat
+  (jumps, wags) — switch live from the tray or with `desktop-buddy character ghost|mochi`
 - Eyes follow the cursor; the buddy chases it when playful
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
@@ -57,16 +69,19 @@ Then:
 
 | Action | How |
 | --- | --- |
-| Move it | Drag with the left mouse button, release to throw |
-| Make it happy | Double-click it |
+| Move it anywhere | Drag with the left mouse button, release to throw |
+| Make it dance (Boo) | Double-click it, tray → Dance!, or `desktop-buddy dance` |
 | Menu | Right-click it, or click the tray icon |
 | Resize | `Ctrl` + mouse wheel |
+| Change character | Tray → Character → Boo-ombastic / Mochi |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
 ### Command line
 
 ```bash
-desktop-buddy quit | show | hide | toggle | pause | resume | settings
+desktop-buddy quit | show | hide | toggle | pause | resume | dance | settings
+desktop-buddy status                    # what is the buddy doing right now?
+desktop-buddy character ghost|mochi     # switch characters
 desktop-buddy click-through on|off     # let clicks pass through to apps below
 desktop-buddy autostart on|off|status
 desktop-buddy --diagnose               # environment/support report
@@ -84,7 +99,8 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `name` | `"Mochi"` | Displayed in the greeting/about |
+| `name` | `"Boo-ombastic"` | Displayed in the greeting/about |
+| `species` | `"ghost"` | `ghost` (Boo-ombastic) or `mochi` (the cat) |
 | `theme` | `"mint"` | `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
 | `scale` | `0.8` | 0.5 – 1.8 |
 | `speed` | `1.0` | 0.4 – 2.5 |
@@ -95,6 +111,8 @@ but hand-editable too):
 | `playful` | `true` | Chase the cursor sometimes |
 | `can_sleep` | `true` | Nap after being idle |
 | `sleep_after` | `180` | Seconds of no interaction before sleeping |
+| `perch_on_windows` | `true` | Sit on the focused browser/terminal window |
+| `perch_delay` | `1.2` | Seconds a window must stay focused before climbing |
 | `position_x` | auto | Last position on screen |
 
 ## Performance
@@ -103,9 +121,12 @@ Measured on this machine (i5-13500H, 2.5× HiDPI, 165 Hz panel, X11, Qt 6.11):
 
 | State | CPU (one core) | Memory |
 | --- | --- | --- |
-| Active (walking/jumping) | ~9 % | ~86 MB |
-| Idle / sleeping | lower (adaptive fps) | ~86 MB |
-| Paused or hidden | ~1 % | ~86 MB |
+| Active (walking/dancing/perched) | ~7 % | ~85 MB |
+| Idle / sleeping | ~4 % (adaptive fps) | ~85 MB |
+| Paused or hidden | ~1 % | ~85 MB |
+
+The window is only ~112 × 128 logical pixels, so even where it overlaps other
+windows it blocks almost nothing.
 
 ## Troubleshooting
 
@@ -121,6 +142,9 @@ Use the tray icon, or run:
 ```bash
 desktop-buddy click-through off
 ```
+
+Click-through uses X11 input shapes; a few compositors handle these oddly, so
+treat it as best-effort. Everything else works with normal clicks.
 
 ### No tray icon
 GNOME needs the AppIndicator extension (installed by default on Ubuntu). Even
@@ -159,8 +183,9 @@ desktop_buddy/
   app.py            CLI, controller, single-instance IPC, diagnostics
   window.py         transparent always-on-top window, input, painting loop
   behavior.py       pure-python physics + state machine (unit-tested)
-  character.py      procedural QPainter creature (poses, squash & stretch)
-  effects.py        dust, sparkles, hearts, Zzz particles
+  character.py      procedural QPainter creatures (Boo + Mochi)
+  effects.py        dust, sparkles, hearts, Zzz, music notes, wisps
+  window_probe.py   X11 active-window probe (browser/terminal detection)
   prefs.py          preferences dialog + live preview
   tray.py           tray icon and shared context menu
   config.py         JSON settings, themes, validation
@@ -182,6 +207,22 @@ PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -v
 
 The behaviour engine (`behavior.py`) has no Qt dependency, so the physics and
 state machine can be tested headlessly.
+
+## Changelog
+
+**1.1.0**
+- New character: **Boo-ombastic** the ghost (floaty physics, dance mode, music
+  notes, wisps) — now the default; Mochi the cat is still selectable.
+- Drag the buddy anywhere on screen, including the top edge (the window's local
+  foot offset absorbs Mutter's on-screen placement clamp).
+- Window perching: detects the focused browser (near the search bar) and
+  terminal (near the prompt) and climbs onto it; follows the window when it
+  moves and floats back down when you switch away.
+- `dance` and `status` commands, tray "Dance!" and "Character" menus.
+- Smaller canvas window → ~30 % less CPU while visible.
+
+**1.0.0**
+- Initial release: Mochi the cat, tray, preferences, autostart, installer.
 
 ## License
 

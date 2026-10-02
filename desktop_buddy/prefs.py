@@ -21,8 +21,8 @@ from PyQt6.QtWidgets import (
 )
 
 from .behavior import Brain, State, World
-from .character import Character, Palette
-from .config import THEMES
+from .character import Palette, make_character
+from .config import SPECIES, THEMES
 
 
 class CharacterPreview(QWidget):
@@ -35,10 +35,9 @@ class CharacterPreview(QWidget):
         self._brain = Brain(world=World(left=-400.0, right=400.0, ground=0.0))
         self._brain.playful = False
         self._brain.can_sleep = False
-        self._character = Character(
-            Palette.from_colors(controller.config.theme_colors())
-        )
         self._palette = Palette.from_colors(controller.config.theme_colors())
+        self._species = controller.config.species
+        self._character = make_character(self._species, self._palette)
         self._last = time.monotonic()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -46,6 +45,9 @@ class CharacterPreview(QWidget):
 
     def refresh(self) -> None:
         self._palette = Palette.from_colors(self.controller.config.theme_colors())
+        if self._species != self.controller.config.species:
+            self._species = self.controller.config.species
+            self._character = make_character(self._species, self._palette)
         self._character.set_palette(self._palette)
         self.update()
 
@@ -128,6 +130,15 @@ class PreferencesDialog(QDialog):
             self.theme_combo.setCurrentIndex(index)
         self.theme_combo.currentIndexChanged.connect(self._on_theme)
         form.addRow("Theme", self.theme_combo)
+
+        self.species_combo = QComboBox()
+        for key, info in SPECIES.items():
+            self.species_combo.addItem(info["label"], userData=key)
+        index = self.species_combo.findData(controller.config.species)
+        if index >= 0:
+            self.species_combo.setCurrentIndex(index)
+        self.species_combo.currentIndexChanged.connect(self._on_species)
+        form.addRow("Character", self.species_combo)
         layout.addLayout(form)
 
         self.check_top = QCheckBox("Always on top")
@@ -135,12 +146,14 @@ class PreferencesDialog(QDialog):
         self.check_battery = QCheckBox("Reduce motion when on battery")
         self.check_playful = QCheckBox("Playful with the cursor")
         self.check_sleep = QCheckBox("Sleep when idle")
+        self.check_perch = QCheckBox("Perch on browser/terminal windows")
         for box in (
             self.check_top,
             self.check_click,
             self.check_battery,
             self.check_playful,
             self.check_sleep,
+            self.check_perch,
         ):
             layout.addWidget(box)
         self.check_top.toggled.connect(controller.set_always_on_top)
@@ -148,6 +161,7 @@ class PreferencesDialog(QDialog):
         self.check_battery.toggled.connect(controller.set_reduce_on_battery)
         self.check_playful.toggled.connect(controller.set_playful)
         self.check_sleep.toggled.connect(controller.set_can_sleep)
+        self.check_perch.toggled.connect(controller.set_perch_on_windows)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -192,11 +206,15 @@ class PreferencesDialog(QDialog):
         index = self.theme_combo.findData(config.theme)
         if index >= 0:
             self.theme_combo.setCurrentIndex(index)
+        index = self.species_combo.findData(config.species)
+        if index >= 0:
+            self.species_combo.setCurrentIndex(index)
         self.check_top.setChecked(config.always_on_top)
         self.check_click.setChecked(config.click_through)
         self.check_battery.setChecked(config.reduce_on_battery)
         self.check_playful.setChecked(config.playful)
         self.check_sleep.setChecked(config.can_sleep)
+        self.check_perch.setChecked(config.perch_on_windows)
         self.preview.refresh()
 
     # ------------------------------------------------------------------- events
@@ -231,6 +249,14 @@ class PreferencesDialog(QDialog):
         key = self.theme_combo.currentData()
         if key:
             self.controller.set_theme(str(key))
+            self.preview.refresh()
+
+    def _on_species(self, _index: int) -> None:
+        if self._loading:
+            return
+        key = self.species_combo.currentData()
+        if key:
+            self.controller.set_species(str(key))
             self.preview.refresh()
 
     def _accept(self) -> None:

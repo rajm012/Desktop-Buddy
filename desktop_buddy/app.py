@@ -19,14 +19,12 @@ from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_SLUG, __version__
-from .config import CONFIG_PATH, LOG_PATH, Config
+from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
 from .platform_utils import (
     autostart_enabled,
     autostart_file,
     battery_label,
-    config_home,
     icon_path,
-    launcher_command,
     on_battery,
     server_name,
     session_type,
@@ -39,7 +37,16 @@ from .window import BuddyWindow
 
 log = logging.getLogger(__name__)
 
-CONTROL_COMMANDS = ("quit", "show", "hide", "toggle", "pause", "resume", "settings")
+CONTROL_COMMANDS = (
+    "quit",
+    "show",
+    "hide",
+    "toggle",
+    "pause",
+    "resume",
+    "settings",
+    "dance",
+)
 
 _CORE_APP: QCoreApplication | None = None
 
@@ -80,6 +87,28 @@ def send_command(command: str, timeout_ms: int = 900) -> bool:
     if socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
         socket.waitForDisconnected(timeout_ms)
     return True
+
+
+def request_status(timeout_ms: int = 1200) -> str | None:
+    """Ask a running instance for a one-line status report."""
+    _ensure_core_app()
+    socket = QLocalSocket()
+    socket.connectToServer(server_name())
+    if not socket.waitForConnected(timeout_ms):
+        return None
+    socket.write(b"status\n")
+    socket.flush()
+    socket.waitForBytesWritten(timeout_ms)
+    reply = b""
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while time.monotonic() < deadline:
+        if socket.waitForReadyRead(200):
+            reply += bytes(socket.readAll())
+            if b"\n" in reply:
+                break
+    socket.disconnectFromServer()
+    text = reply.decode("utf-8", "replace").strip()
+    return text or None
 
 
 class Controller(QObject):
@@ -213,6 +242,29 @@ class Controller(QObject):
         self.window.apply_config()
         self._schedule_save()
 
+    def set_species(self, key: str) -> None:
+        if key not in SPECIES:
+            return
+        previous_default = SPECIES.get(self.config.species, {}).get("default_name", "")
+        self.config.species = key
+        if not self.config.name or self.config.name == previous_default:
+            self.config.name = SPECIES[key]["default_name"]
+        self.window.apply_config()
+        self.tray.refresh()
+        self._schedule_save()
+        self.window.say(f"{SPECIES[key]['label']} reporting for duty!", 3.2)
+
+    def dance(self) -> None:
+        self.window.dance()
+
+    def set_perch_on_windows(self, enabled: bool) -> None:
+        self.config.perch_on_windows = bool(enabled)
+        self.window.apply_config()
+        self.tray.refresh()
+        self._schedule_save()
+        if enabled:
+            self.window.say("I'll keep an eye on your windows!", 3.0)
+
     def set_autostart(self, enabled: bool) -> None:
         enabled = bool(enabled)
         try:
@@ -273,9 +325,11 @@ class Controller(QObject):
                 f"<h3>Desktop Buddy {__version__}</h3>"
                 "<p>A tiny creature that lives on your desktop.</p>"
                 "<p><b>Tips</b><br>"
-                "&bull; Drag the buddy with the left mouse button<br>"
-                "&bull; Double-click for a happy hop<br>"
+                "&bull; Drag the buddy anywhere with the left mouse button<br>"
+                "&bull; Double-click: Boo dances, Mochi hops<br>"
                 "&bull; Right-click for the menu; Ctrl+wheel resizes<br>"
+                "&bull; It perches on your browser and terminal windows<br>"
+                "&bull; Switch characters from the tray menu<br>"
                 "&bull; Tray icon → Preferences for themes and behaviour</p>"
                 f"<p style='color:gray'>Python {sys.version.split()[0]} &middot; "
                 f"Qt {QT_VERSION_STR} &middot; PyQt {PYQT_VERSION_STR} &middot; "
@@ -306,18 +360,23 @@ class Controller(QObject):
         def read(sock: QLocalSocket = socket) -> None:
             data = bytes(sock.readAll()).decode("utf-8", "replace")
             for line in data.splitlines():
-                self.handle_command(line.strip())
+                reply = self.handle_command(line.strip())
+                if reply:
+                    sock.write((reply + "\n").encode("utf-8"))
+                    sock.flush()
 
         socket.readyRead.connect(read)
         socket.disconnected.connect(socket.deleteLater)
         read(socket)
 
-    def handle_command(self, command: str) -> None:
+    def handle_command(self, command: str) -> str | None:
         if not command:
-            return
+            return None
         parts = command.split()
         verb = parts[0]
         log.info("IPC command: %s", command)
+        if verb == "status":
+            return self._status_text()
         if verb == "quit":
             self.quit()
         elif verb == "show":
@@ -332,10 +391,33 @@ class Controller(QObject):
             self.set_paused(False)
         elif verb == "settings":
             self.open_settings()
+        elif verb == "dance":
+            self.dance()
+        elif verb == "character" and len(parts) > 1:
+            self.set_species(parts[1])
         elif verb == "click-through" and len(parts) > 1:
             self.set_click_through(parts[1] == "on")
         elif verb == "autostart" and len(parts) > 1:
             self.set_autostart(parts[1] == "on")
+        return None
+
+    def _status_text(self) -> str:
+        brain = self.window._brain  # noqa: SLF001 - diagnostic view
+        screen_ground = brain.screen_world.ground if brain.screen_world else -1.0
+        cooldown = max(0.0, self.window._perch_cooldown_until - time.monotonic())
+        return (
+            f"state={brain.state.value} x={brain.x:.0f} y={brain.y:.0f} "
+            f"world=({brain.world.left:.0f}..{brain.world.right:.0f},"
+            f"ground={brain.world.ground:.0f}) screen_ground={screen_ground:.0f} "
+            f"perched={'yes' if brain.perched else 'no'} "
+            f"perch_kind={brain.perch.kind if brain.perch else '-'} "
+            f"cooldown={cooldown:.0f}s win=({self.window.x()},{self.window.y()}) "
+            f"feet_local={self.window._feet_local_px:.1f} "  # noqa: SLF001
+            f"dpr={self.window.devicePixelRatioF():.2f} "
+            f"presses={self.window._press_count} "  # noqa: SLF001
+            f"species={self.config.species} visible={self.window.isVisible()} "
+            f"paused={self.window.is_paused}"
+        )
 
     def _greet(self) -> None:
         self.window.say(
@@ -376,6 +458,22 @@ def diagnose() -> int:
     line("WAYLAND_DISPLAY", os.environ.get("WAYLAND_DISPLAY", "-"))
     line("libxcb-cursor", "available" if _libxcb_cursor_available() else "MISSING")
     line("battery", f"{battery_label()} | on battery: {on_battery()}")
+    try:
+        from .window_probe import X11WindowProbe, classify
+
+        probe = X11WindowProbe()
+        info = probe.active_window()
+        if info is not None:
+            line(
+                "active window",
+                f"{info.class_name or '?'} {info.width}x{info.height} "
+                f"at ({info.x},{info.y}) kind={classify(info.class_name)}",
+            )
+        else:
+            line("active window", "unavailable")
+        probe.close()
+    except Exception as exc:  # noqa: BLE001
+        line("active window", f"error: {exc}")
     line("launcher", which_launcher())
     line("autostart", "enabled" if autostart_enabled() else "disabled")
     line("autostart file", autostart_file() if autostart_enabled() else "-")
@@ -426,9 +524,13 @@ def build_parser() -> argparse.ArgumentParser:
         ("toggle", "toggle visibility"),
         ("pause", "pause movement"),
         ("resume", "resume movement"),
+        ("dance", "start a dance party"),
+        ("status", "print what the buddy is doing"),
         ("settings", "open the preferences window"),
     ):
         sub.add_parser(name, help=help_text)
+    character = sub.add_parser("character", help="switch character")
+    character.add_argument("value", choices=tuple(SPECIES))
     click = sub.add_parser("click-through", help="toggle input pass-through")
     click.add_argument("value", choices=("on", "off"))
     auto = sub.add_parser("autostart", help="manage login autostart")
@@ -448,6 +550,13 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose)
 
     if args.command is not None:
+        if args.command == "status":
+            reply = request_status()
+            if reply:
+                print(reply)
+                return 0
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
         if args.command in CONTROL_COMMANDS and send_command(args.command):
             return 0
         if args.command == "autostart":
@@ -468,6 +577,17 @@ def main(argv: list[str] | None = None) -> int:
             config.click_through = enabled
             config.save()
             print(f"Click-through {'enabled' if enabled else 'disabled'}")
+            return 0
+        if args.command == "character":
+            if send_command(f"character {args.value}"):
+                return 0
+            config = Config.load()
+            previous_default = SPECIES.get(config.species, {}).get("default_name", "")
+            config.species = args.value
+            if not config.name or config.name == previous_default:
+                config.name = SPECIES[args.value]["default_name"]
+            config.save()
+            print(f"Character set to {SPECIES[args.value]['label']}")
             return 0
         print("Desktop Buddy is not running.", file=sys.stderr)
         return 1

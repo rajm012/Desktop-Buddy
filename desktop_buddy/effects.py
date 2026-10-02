@@ -1,10 +1,10 @@
-"""Small particle system: dust, sparkles, hearts and sleep bubbles."""
+"""Small particle system: dust, sparkles, hearts, sleep bubbles, notes, wisps."""
 
 from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
@@ -50,6 +50,10 @@ class ParticleSystem:
             self._emit_sparkles(x, y, palette)
         elif kind == "zzz":
             self._emit_zzz(x, y, palette)
+        elif kind == "notes":
+            self._emit_note(x, y, palette)
+        elif kind == "wisp":
+            self._emit_wisp(x, y, palette)
 
     def _emit_dust(self, x: float, y: float, palette: Palette) -> None:
         for _ in range(self.rng.randint(6, 9)):
@@ -126,6 +130,43 @@ class ParticleSystem:
             )
         )
 
+    def _emit_note(self, x: float, y: float, palette: Palette) -> None:
+        color = QColor(palette.accent)
+        if self.rng.random() < 0.4:
+            color = QColor(palette.body_dark)
+        self.items.append(
+            Particle(
+                kind="note",
+                x=x + self.rng.uniform(-8.0, 8.0),
+                y=y,
+                vx=self.rng.uniform(-14.0, 22.0),
+                vy=-self.rng.uniform(34.0, 52.0),
+                life=self.rng.uniform(1.0, 1.5),
+                max_life=1.5,
+                size=self.rng.uniform(9.0, 13.0),
+                color=color,
+                wobble=self.rng.uniform(0.0, math.tau),
+            )
+        )
+
+    def _emit_wisp(self, x: float, y: float, palette: Palette) -> None:
+        color = QColor(palette.belly)
+        color.setAlpha(150)
+        self.items.append(
+            Particle(
+                kind="wisp",
+                x=x + self.rng.uniform(-6.0, 6.0),
+                y=y + self.rng.uniform(-6.0, 6.0),
+                vx=self.rng.uniform(-46.0, -12.0),
+                vy=self.rng.uniform(-8.0, 10.0),
+                life=self.rng.uniform(0.5, 0.9),
+                max_life=0.9,
+                size=self.rng.uniform(4.0, 7.5),
+                color=color,
+                wobble=self.rng.uniform(0.0, math.tau),
+            )
+        )
+
     # ------------------------------------------------------------------- update
     def update(self, dt: float) -> None:
         alive: list[Particle] = []
@@ -148,6 +189,14 @@ class ParticleSystem:
                 particle.rotation += particle.spin * dt
             elif particle.kind == "zzz":
                 particle.x += math.sin(particle.progress * 6.0) * 6.0 * dt
+            elif particle.kind == "note":
+                particle.x += math.sin(
+                    particle.progress * 7.0 + particle.wobble
+                ) * 12.0 * dt
+                particle.vy -= 6.0 * dt
+            elif particle.kind == "wisp":
+                particle.vy += 8.0 * dt
+                particle.vx *= max(0.0, 1.0 - dt * 1.8)
             if particle.y > 26.0:
                 continue
             alive.append(particle)
@@ -170,6 +219,10 @@ class ParticleSystem:
                 self._paint_sparkle(painter, particle, alpha)
             elif particle.kind == "zzz":
                 self._paint_zzz(painter, particle, alpha)
+            elif particle.kind == "note":
+                self._paint_note(painter, particle, alpha)
+            elif particle.kind == "wisp":
+                self._paint_wisp(painter, particle, alpha)
             painter.restore()
 
     def _paint_dust(self, painter: QPainter, particle: Particle, alpha: int) -> None:
@@ -218,4 +271,28 @@ class ParticleSystem:
             QRectF(-12.0, -12.0, 24.0, 24.0),
             Qt.AlignmentFlag.AlignCenter,
             letter,
+        )
+
+    def _paint_note(self, painter: QPainter, particle: Particle, alpha: int) -> None:
+        color = QColor(particle.color)
+        color.setAlpha(alpha)
+        painter.setPen(QPen(color))
+        font = QFont("DejaVu Sans", int(particle.size))
+        font.setBold(True)
+        painter.setFont(font)
+        glyph = "♪" if int(particle.progress * 5) % 2 == 0 else "♫"
+        painter.drawText(
+            QRectF(-12.0, -12.0, 24.0, 24.0),
+            Qt.AlignmentFlag.AlignCenter,
+            glyph,
+        )
+
+    def _paint_wisp(self, painter: QPainter, particle: Particle, alpha: int) -> None:
+        color = QColor(particle.color)
+        color.setAlpha(min(alpha, 120))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        grow = 1.0 + particle.progress * 1.4
+        painter.drawEllipse(
+            QPointF(0.0, 0.0), particle.size * grow, particle.size * grow * 0.8
         )

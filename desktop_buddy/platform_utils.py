@@ -11,6 +11,34 @@ from pathlib import Path
 from . import APP_SLUG
 
 
+_X_ERROR_HANDLER_TYPE = ctypes.CFUNCTYPE(
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p
+)
+
+
+@_X_ERROR_HANDLER_TYPE
+def _ignore_x_errors(_display, _event):  # pragma: no cover - X11 callback
+    """Swallow X11 errors so a stale window id can never kill the app."""
+    return 0
+
+
+def _install_error_handler(x11):
+    x11.XSetErrorHandler.restype = ctypes.c_void_p
+    x11.XSetErrorHandler.argtypes = [_X_ERROR_HANDLER_TYPE]
+    x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    previous = x11.XSetErrorHandler(_ignore_x_errors)
+    return previous
+
+
+def _restore_error_handler(x11, display, previous) -> None:
+    try:
+        x11.XSync(display, 0)
+        if previous:
+            x11.XSetErrorHandler(ctypes.cast(previous, _X_ERROR_HANDLER_TYPE))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def config_home() -> Path:
     value = os.environ.get("XDG_CONFIG_HOME")
     return Path(value) if value else Path.home() / ".config"
@@ -158,6 +186,7 @@ def set_window_sticky(win_id: int) -> bool:
         display = x11.XOpenDisplay(None)
         if not display:
             return False
+        previous = _install_error_handler(x11)
         try:
             atom = x11.XInternAtom(display, b"_NET_WM_DESKTOP", 0)
             if not atom:
@@ -175,7 +204,9 @@ def set_window_sticky(win_id: int) -> bool:
             )
             x11.XFlush(display)
         finally:
+            _restore_error_handler(x11, display, previous)
             x11.XCloseDisplay(display)
         return True
     except Exception:  # noqa: BLE001 - purely cosmetic, never fatal
         return False
+

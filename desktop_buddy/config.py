@@ -86,6 +86,13 @@ THEMES: dict[str, dict[str, str]] = {
 
 DEFAULT_THEME = "mint"
 
+# Character roster. Keys are stored in the config; labels are user-facing.
+SPECIES: dict[str, dict[str, str]] = {
+    "ghost": {"label": "Boo-ombastic", "default_name": "Boo-ombastic"},
+    "mochi": {"label": "Mochi", "default_name": "Mochi"},
+}
+DEFAULT_SPECIES = "ghost"
+
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
@@ -95,7 +102,8 @@ def _clamp(value: float, low: float, high: float) -> float:
 class Config:
     """User-facing settings, persisted as JSON."""
 
-    name: str = "Mochi"
+    name: str = SPECIES[DEFAULT_SPECIES]["default_name"]
+    species: str = DEFAULT_SPECIES
     theme: str = DEFAULT_THEME
     scale: float = 0.8
     speed: float = 1.0
@@ -106,6 +114,8 @@ class Config:
     playful: bool = True
     can_sleep: bool = True
     sleep_after: float = 180.0
+    perch_on_windows: bool = True
+    perch_delay: float = 1.2
     autostart: bool = False
     paused: bool = False
     position_x: float | None = None
@@ -115,6 +125,10 @@ class Config:
     def from_dict(cls, data: dict[str, Any]) -> "Config":
         known = {f.name for f in fields(cls)}
         kwargs = {key: value for key, value in data.items() if key in known}
+        # Migration: configs written before the ghost existed had no species
+        # field and used the cat's default name.
+        if "species" not in data and kwargs.get("name", "Mochi") == "Mochi":
+            kwargs["name"] = SPECIES[DEFAULT_SPECIES]["default_name"]
         config = cls(**kwargs)
         config.normalize()
         return config
@@ -146,6 +160,8 @@ class Config:
     # --------------------------------------------------------------- helpers
     def normalize(self) -> None:
         self.name = str(self.name).strip()[:24] or "Mochi"
+        if self.species not in SPECIES:
+            self.species = DEFAULT_SPECIES
         if self.theme not in THEMES:
             self.theme = DEFAULT_THEME
         try:
@@ -166,6 +182,7 @@ class Config:
             "reduce_on_battery",
             "playful",
             "can_sleep",
+            "perch_on_windows",
             "autostart",
             "paused",
         ):
@@ -174,6 +191,10 @@ class Config:
             self.sleep_after = _clamp(float(self.sleep_after), 15.0, 3600.0)
         except (TypeError, ValueError):
             self.sleep_after = 180.0
+        try:
+            self.perch_delay = _clamp(float(self.perch_delay), 0.3, 10.0)
+        except (TypeError, ValueError):
+            self.perch_delay = 1.2
         if self.position_x is not None:
             try:
                 self.position_x = float(self.position_x)

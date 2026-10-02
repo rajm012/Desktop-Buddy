@@ -9,8 +9,7 @@ from PyQt6.QtGui import QAction, QActionGroup, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .character import Palette, icon_pixmap
-from .config import THEMES
-from .platform_utils import icon_path
+from .config import SPECIES, THEMES
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +38,7 @@ class BuddyTray(QObject):
         self._speed_actions: list[tuple[QAction, float]] = []
         self._size_actions: list[tuple[QAction, float]] = []
         self._theme_actions: list[tuple[QAction, str]] = []
+        self._species_actions: list[tuple[QAction, str]] = []
         self._build_menu()
 
         self.icon: QSystemTrayIcon | None = None
@@ -55,13 +55,9 @@ class BuddyTray(QObject):
 
     # ------------------------------------------------------------------- build
     def _make_icon(self) -> QIcon:
-        path = icon_path()
-        if path.is_file():
-            icon = QIcon(str(path))
-            if not icon.isNull():
-                return icon
-        palette = Palette.from_colors(self.controller.config.theme_colors())
-        return QIcon(icon_pixmap(palette, 128, dpr=2.0))
+        config = self.controller.config
+        palette = Palette.from_colors(config.theme_colors())
+        return QIcon(icon_pixmap(config.species, palette, 128, dpr=2.0))
 
     def _build_menu(self) -> None:
         controller = self.controller
@@ -84,6 +80,11 @@ class BuddyTray(QObject):
         self.act_playful.setCheckable(True)
         self.act_sleep = menu.addAction("Sleep when idle", controller.set_can_sleep)
         self.act_sleep.setCheckable(True)
+        self.act_perch = menu.addAction(
+            "Perch on browser/terminal", controller.set_perch_on_windows
+        )
+        self.act_perch.setCheckable(True)
+        menu.addAction("Dance!", controller.dance)
 
         speed_menu = menu.addMenu("Speed")
         speed_group = QActionGroup(speed_menu)
@@ -115,6 +116,16 @@ class BuddyTray(QObject):
             theme_group.addAction(action)
             self._theme_actions.append((action, key))
 
+        character_menu = menu.addMenu("Character")
+        character_group = QActionGroup(character_menu)
+        character_group.setExclusive(True)
+        for key, info in SPECIES.items():
+            action = character_menu.addAction(info["label"])
+            action.setCheckable(True)
+            action.triggered.connect(lambda _checked, k=key: controller.set_species(k))
+            character_group.addAction(action)
+            self._species_actions.append((action, key))
+
         menu.addSeparator()
         self.act_autostart = menu.addAction("Start at login", controller.set_autostart)
         self.act_autostart.setCheckable(True)
@@ -137,6 +148,7 @@ class BuddyTray(QObject):
         self.act_battery.setChecked(config.reduce_on_battery)
         self.act_playful.setChecked(config.playful)
         self.act_sleep.setChecked(config.can_sleep)
+        self.act_perch.setChecked(config.perch_on_windows)
         self.act_autostart.setChecked(self.controller.autostart_active())
         for action, value in self._speed_actions:
             action.setChecked(abs(config.speed - value) < 0.01)
@@ -144,6 +156,8 @@ class BuddyTray(QObject):
             action.setChecked(abs(config.scale - value) < 0.01)
         for action, key in self._theme_actions:
             action.setChecked(config.theme == key)
+        for action, key in self._species_actions:
+            action.setChecked(config.species == key)
 
     def show_message(self, title: str, message: str) -> None:
         if self.icon is not None and self.icon.isVisible():
