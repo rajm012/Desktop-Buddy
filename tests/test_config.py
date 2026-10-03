@@ -76,6 +76,19 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.perch_on_windows)
         self.assertGreater(config.perch_delay, 0.0)
 
+    def test_reminder_defaults(self) -> None:
+        config = Config()
+        self.assertTrue(config.reminders_enabled)
+        self.assertEqual(config.breakfast_time, "09:00")
+        self.assertEqual(config.lunch_time, "13:30")
+        self.assertEqual(config.dinner_time, "21:00")
+        self.assertEqual(config.water_interval_minutes, 45)
+
+    def test_invalid_times_are_normalized(self) -> None:
+        config = Config.from_dict({"lunch_time": "25:99", "water_interval_minutes": 5})
+        self.assertEqual(config.lunch_time, "13:30")
+        self.assertEqual(config.water_interval_minutes, 10)
+
 
 class AutostartTests(unittest.TestCase):
     def test_autostart_roundtrip(self) -> None:

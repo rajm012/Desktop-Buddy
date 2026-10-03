@@ -1,0 +1,122 @@
+"""Tests for the wellness reminder scheduler."""
+
+from __future__ import annotations
+
+import random
+import unittest
+from datetime import datetime
+
+from desktop_buddy.config import Config
+from desktop_buddy.wellness import ReminderState, WellnessEngine
+
+
+def engine_at(moment: datetime, config: Config | None = None, state=None) -> WellnessEngine:
+    return WellnessEngine(
+        config or Config(), state, random.Random(3), now_fn=lambda: moment
+    )
+
+
+class MealReminderTests(unittest.TestCase):
+    def test_breakfast_due_at_its_time(self) -> None:
+        engine = engine_at(datetime(2026, 10, 3, 9, 0))
+        self.assertIn("breakfast", [r.id for r in engine.due()])
+
+    def test_breakfast_not_due_before_its_time(self) -> None:
+        engine = engine_at(datetime(2026, 10, 3, 8, 50))
+        self.assertNotIn("breakfast", [r.id for r in engine.due()])
+
+    def test_grace_window_limits_late_nags(self) -> None:
+        late = engine_at(datetime(2026, 10, 3, 9, 30))
+        self.assertIn("breakfast", [r.id for r in late.due()])
+        too_late = engine_at(datetime(2026, 10, 3, 10, 30))
+        self.assertNotIn("breakfast", [r.id for r in too_late.due()])
+
+    def test_meal_does_not_fire_twice_a_day(self) -> None:
+        engine = engine_at(datetime(2026, 10, 3, 9, 0))
+        reminder = engine.find("breakfast")
+        self.assertIsNotNone(reminder)
+        engine.mark_done(reminder, datetime(2026, 10, 3, 9, 0))
+        later = engine_at(datetime(2026, 10, 3, 9, 20), Config(), engine.state)
+        self.assertNotIn("breakfast", [r.id for r in later.due()])
+
+    def test_snooze_refires_after_delay(self) -> None:
+        engine = engine_at(datetime(2026, 10, 3, 13, 30))
+        lunch = engine.find("lunch")
+        self.assertIsNotNone(lunch)
+        engine.snooze(lunch, 10, datetime(2026, 10, 3, 13, 30))
+        self.assertNotIn("lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 35))])
+        self.assertIn("lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 41))])
+
+    def test_disabled_meals_are_skipped(self) -> None:
+        config = Config()
+        config.lunch_enabled = False
+        engine = engine_at(datetime(2026, 10, 3, 13, 30), config)
+        self.assertNotIn("lunch", [r.id for r in engine.due()])
+
+    def test_reminders_can_be_switched_off(self) -> None:
+        config = Config()
+        config.reminders_enabled = False
+        engine = engine_at(datetime(2026, 10, 3, 13, 30), config)
+        self.assertEqual(engine.due(), [])
+
+
+class IntervalReminderTests(unittest.TestCase):
+    def test_water_fires_after_interval(self) -> None:
+        config = Config()
+        config.water_interval_minutes = 30
+        state = ReminderState()
+        state.last_done["water"] = datetime(2026, 10, 3, 11, 0)
+        engine = engine_at(datetime(2026, 10, 3, 11, 40), config, state)
+        self.assertIn("water", [r.id for r in engine.due()])
+
+    def test_water_waits_for_interval(self) -> None:
+        config = Config()
+        config.water_interval_minutes = 30
+        state = ReminderState()
+        state.last_done["water"] = datetime(2026, 10, 3, 11, 30)
+        engine = engine_at(datetime(2026, 10, 3, 11, 40), config, state)
+        self.assertNotIn("water", [r.id for r in engine.due()])
+
+    def test_water_respects_active_hours(self) -> None:
+        config = Config()
+        config.water_interval_minutes = 30
+        state = ReminderState()
+        state.last_done["water"] = datetime(2026, 10, 3, 2, 20)
+        engine = engine_at(datetime(2026, 10, 3, 3, 0), config, state)
+        self.assertNotIn("water", [r.id for r in engine.due()])
+
+    def test_first_interval_starts_at_launch(self) -> None:
+        config = Config()
+        config.water_interval_minutes = 45
+        engine = engine_at(datetime(2026, 10, 3, 12, 0), config)
+        self.assertNotIn("water", [r.id for r in engine.due()])
+        self.assertIn(
+            "water", [r.id for r in engine.due(datetime(2026, 10, 3, 12, 50))]
+        )
+
+
+class UpcomingTests(unittest.TestCase):
+    def test_upcoming_is_sorted(self) -> None:
+        engine = engine_at(datetime(2026, 10, 3, 10, 0))
+        entries = engine.upcoming(6)
+        self.assertTrue(entries)
+        times = [when for when, _ in entries]
+        self.assertEqual(times, sorted(times))
+
+    def test_state_roundtrip(self) -> None:
+        state = ReminderState()
+        state.last_done["water"] = datetime(2026, 10, 3, 10, 0)
+        state.snooze_until["lunch"] = datetime(2026, 10, 3, 13, 45)
+        restored = ReminderState.from_dict(state.to_dict())
+        self.assertEqual(restored.last_done["water"], state.last_done["water"])
+        self.assertEqual(restored.snooze_until["lunch"], state.snooze_until["lunch"])
+
+    def test_state_handles_garbage(self) -> None:
+        restored = ReminderState.from_dict(
+            {"last_done": {"water": "not a date"}, "snooze_until": {}}
+        )
+        self.assertEqual(restored.last_done, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

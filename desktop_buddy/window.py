@@ -218,6 +218,29 @@ class BuddyWindow(QWidget):
             self._handle_event(event)
         self.update()
 
+    def remind(self, kind: str, text: str) -> None:
+        """Play a little attention animation for a wellness reminder."""
+        self.say(text, seconds=9.0)
+        if kind == "water":
+            self._particles.emit("drops", 0.0, -34.0, self._palette)
+        elif kind == "meal":
+            self._particles.emit("hearts", 0.0, -62.0, self._palette)
+            self._particles.emit("sparkles", 0.0, -30.0, self._palette)
+        elif kind == "winddown":
+            self._particles.emit("zzz", 18.0, -76.0, self._palette)
+            self._particles.emit("sparkles", 0.0, -40.0, self._palette)
+        else:
+            self._particles.emit("sparkles", 0.0, -36.0, self._palette)
+            self._particles.emit("notes", 6.0, -80.0, self._palette)
+        if not self._paused and self._brain.state not in (
+            State.AIR,
+            State.DRAG,
+            State.CLIMB,
+        ):
+            for event in self._brain.dance():
+                self._handle_event(event)
+        self.update()
+
     def apply_config(self) -> None:
         self.config.normalize()
         config = self.config
@@ -610,9 +633,10 @@ class BuddyWindow(QWidget):
         font.setBold(True)
         painter.setFont(font)
         metrics = painter.fontMetrics()
-        text_width = metrics.horizontalAdvance(self._bubble_text)
+        lines = self._wrap_bubble_text(self._bubble_text, metrics, 118.0)
+        text_width = max(metrics.horizontalAdvance(line) for line in lines)
         width = text_width + 22.0
-        height = metrics.height() + 12.0
+        height = metrics.height() * len(lines) + 12.0
         center_y = -104.0
         rect = QRectF(-width / 2.0, center_y - height, width, height)
 
@@ -628,5 +652,29 @@ class BuddyWindow(QWidget):
         painter.setBrush(QColor(255, 255, 255, 238))
         painter.drawPath(tail)
         painter.setPen(QPen(self._palette.eye))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._bubble_text)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "\n".join(lines))
         painter.setOpacity(1.0)
+
+    @staticmethod
+    def _wrap_bubble_text(text: str, metrics, max_width: float) -> list[str]:  # noqa: ANN001
+        words = text.split()
+        if not words:
+            return [text]
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if not current or metrics.horizontalAdvance(candidate) <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        if len(lines) > 3:
+            merged = " ".join(lines[2:])
+            lines = lines[:2]
+            while merged and metrics.horizontalAdvance(merged + "…") > max_width:
+                merged = merged[:-1]
+            lines.append(merged + "…")
+        return lines

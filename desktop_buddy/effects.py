@@ -54,6 +54,8 @@ class ParticleSystem:
             self._emit_note(x, y, palette)
         elif kind == "wisp":
             self._emit_wisp(x, y, palette)
+        elif kind == "drops":
+            self._emit_drops(x, y, palette)
 
     def _emit_dust(self, x: float, y: float, palette: Palette) -> None:
         for _ in range(self.rng.randint(6, 9)):
@@ -167,6 +169,25 @@ class ParticleSystem:
             )
         )
 
+    def _emit_drops(self, x: float, y: float, palette: Palette) -> None:
+        blue = QColor("#54c7ec")
+        for _ in range(self.rng.randint(9, 13)):
+            color = QColor(blue)
+            color.setAlpha(self.rng.randint(150, 230))
+            self.items.append(
+                Particle(
+                    kind="drop",
+                    x=x + self.rng.uniform(-34.0, 34.0),
+                    y=y + self.rng.uniform(-18.0, 6.0),
+                    vx=self.rng.uniform(-24.0, 24.0),
+                    vy=-self.rng.uniform(90.0, 200.0),
+                    life=self.rng.uniform(0.7, 1.2),
+                    max_life=1.2,
+                    size=self.rng.uniform(3.0, 5.5),
+                    color=color,
+                )
+            )
+
     # ------------------------------------------------------------------- update
     def update(self, dt: float) -> None:
         alive: list[Particle] = []
@@ -197,6 +218,8 @@ class ParticleSystem:
             elif particle.kind == "wisp":
                 particle.vy += 8.0 * dt
                 particle.vx *= max(0.0, 1.0 - dt * 1.8)
+            elif particle.kind == "drop":
+                particle.vy += 420.0 * dt
             if particle.y > 26.0:
                 continue
             alive.append(particle)
@@ -223,6 +246,8 @@ class ParticleSystem:
                 self._paint_note(painter, particle, alpha)
             elif particle.kind == "wisp":
                 self._paint_wisp(painter, particle, alpha)
+            elif particle.kind == "drop":
+                self._paint_drop(painter, particle, alpha)
             painter.restore()
 
     def _paint_dust(self, painter: QPainter, particle: Particle, alpha: int) -> None:
@@ -295,4 +320,21 @@ class ParticleSystem:
         grow = 1.0 + particle.progress * 1.4
         painter.drawEllipse(
             QPointF(0.0, 0.0), particle.size * grow, particle.size * grow * 0.8
+        )
+
+    def _paint_drop(self, painter: QPainter, particle: Particle, alpha: int) -> None:
+        color = QColor(particle.color)
+        color.setAlpha(alpha)
+        size = particle.size
+        path = QPainterPath()
+        path.moveTo(0.0, -size * 1.6)
+        path.cubicTo(size * 0.95, -size * 0.25, size * 0.85, size, 0.0, size)
+        path.cubicTo(-size * 0.85, size, -size * 0.95, -size * 0.25, 0.0, -size * 1.6)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawPath(path)
+        highlight = QColor(255, 255, 255, min(200, alpha))
+        painter.setBrush(highlight)
+        painter.drawEllipse(
+            QPointF(-size * 0.25, size * 0.15), size * 0.22, size * 0.3
         )

@@ -86,6 +86,24 @@ class BuddyTray(QObject):
         self.act_perch.setCheckable(True)
         menu.addAction("Dance!", controller.dance)
 
+        reminders_menu = menu.addMenu("Reminders")
+        self.act_reminders = reminders_menu.addAction(
+            "Wellness reminders", controller.set_reminders_enabled
+        )
+        self.act_reminders.setCheckable(True)
+        self.act_chime = reminders_menu.addAction(
+            "Gentle chime", controller.set_reminder_sound
+        )
+        self.act_chime.setCheckable(True)
+        reminders_menu.addSeparator()
+        reminders_menu.addAction(
+            "Water now", lambda: controller.remind_now("water")
+        )
+        reminders_menu.addAction(
+            "Stretch now", lambda: controller.remind_now("break")
+        )
+        reminders_menu.addAction("Upcoming…", controller.show_reminders)
+
         speed_menu = menu.addMenu("Speed")
         speed_group = QActionGroup(speed_menu)
         speed_group.setExclusive(True)
@@ -149,6 +167,8 @@ class BuddyTray(QObject):
         self.act_playful.setChecked(config.playful)
         self.act_sleep.setChecked(config.can_sleep)
         self.act_perch.setChecked(config.perch_on_windows)
+        self.act_reminders.setChecked(config.reminders_enabled)
+        self.act_chime.setChecked(config.reminder_sound)
         self.act_autostart.setChecked(self.controller.autostart_active())
         for action, value in self._speed_actions:
             action.setChecked(abs(config.speed - value) < 0.01)

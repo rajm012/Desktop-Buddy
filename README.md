@@ -4,7 +4,8 @@ Tiny creatures that live on your Ubuntu desktop.
 
 **Boo-ombastic** is a floaty little ghost who drifts around, dances on your
 browser's search bar, hangs out near your terminal prompt, investigates your
-cursor and gets very excited when poked. **Mochi**, the original round
+cursor, gets very excited when poked — and **looks after you** with gentle
+wellness reminders for meals, snacks, water and stretch breaks. **Mochi**, the original round
 blob-cat, is still available from the tray menu if you want the classic.
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
@@ -25,6 +26,12 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
   the screen, top edge, on top of another window
 - **Two characters**: Boo-ombastic the ghost (floats, dances) and Mochi the cat
   (jumps, wags) — switch live from the tray or with `desktop-buddy character ghost|mochi`
+- **Wellness reminders**: breakfast 09:00, lunch 13:30, optional snack 16:30,
+  dinner 21:00, wind-down 23:00, water every 45 min and a stretch break every
+  60 min (both only during your active hours, 09:00–22:30 by default)
+- Reminders arrive with a dancing Boo, a speech bubble, themed particles
+  (water droplets, hearts, notes), a gentle chime and a card with
+  **Done** / **Snooze 10m** buttons; snoozed reminders come back on time
 - Eyes follow the cursor; the buddy chases it when playful
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
@@ -74,6 +81,7 @@ Then:
 | Menu | Right-click it, or click the tray icon |
 | Resize | `Ctrl` + mouse wheel |
 | Change character | Tray → Character → Boo-ombastic / Mochi |
+| Wellness reminders | Tray → Reminders (on/off, chime, Water now, Stretch now, Upcoming…) |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
 ### Command line
@@ -82,6 +90,9 @@ Then:
 desktop-buddy quit | show | hide | toggle | pause | resume | dance | settings
 desktop-buddy status                    # what is the buddy doing right now?
 desktop-buddy character ghost|mochi     # switch characters
+desktop-buddy reminders status          # next reminders, in order
+desktop-buddy reminders on|off          # pause/resume wellness reminders
+desktop-buddy remind water              # fire a reminder now (water/lunch/break/…)
 desktop-buddy click-through on|off     # let clicks pass through to apps below
 desktop-buddy autostart on|off|status
 desktop-buddy --diagnose               # environment/support report
@@ -113,6 +124,14 @@ but hand-editable too):
 | `sleep_after` | `180` | Seconds of no interaction before sleeping |
 | `perch_on_windows` | `true` | Sit on the focused browser/terminal window |
 | `perch_delay` | `1.2` | Seconds a window must stay focused before climbing |
+| `reminders_enabled` | `true` | Master switch for all wellness reminders |
+| `reminder_sound` | `true` | Play a gentle generated chime |
+| `breakfast_time` | `"09:00"` | Breakfast reminder (also `lunch_time` 13:30, `snack_time` 16:30, `dinner_time` 21:00, `winddown_time` 23:00) |
+| `water_interval_minutes` | `45` | Water reminder interval |
+| `break_interval_minutes` | `60` | Stretch reminder interval |
+| `active_start` / `active_end` | `"09:00"` / `"22:30"` | Window in which interval reminders may fire |
+| `reminder_grace_minutes` | `45` | How late a missed scheduled reminder may still fire |
+| `snooze_minutes` | `10` | Default snooze length on the reminder card |
 | `position_x` | auto | Last position on screen |
 
 ## Performance
@@ -127,6 +146,8 @@ Measured on this machine (i5-13500H, 2.5× HiDPI, 165 Hz panel, X11, Qt 6.11):
 
 The window is only ~112 × 128 logical pixels, so even where it overlaps other
 windows it blocks almost nothing.
+
+The reminder scheduler wakes up every 20 seconds and costs effectively nothing.
 
 ## Troubleshooting
 
@@ -166,6 +187,15 @@ desktop-buddy --diagnose
 tail -f ~/.local/state/desktop-buddy/desktop-buddy.log
 ```
 
+### Reminders don't fire
+- Check `desktop-buddy reminders status` for the next scheduled times.
+- Water/stretch reminders only fire between `active_start` and `active_end`
+  (default 09:00–22:30); meals fire at their fixed times.
+- If the laptop was asleep at a meal time, Boo still reminds you within the
+  grace window (45 min by default) when you come back.
+- No chime? Boo uses `paplay`, `pw-play` or `aplay`; install one of them if
+  your system has none (all three are normally present on Ubuntu).
+
 ## Uninstall
 
 ```bash
@@ -186,6 +216,9 @@ desktop_buddy/
   character.py      procedural QPainter creatures (Boo + Mochi)
   effects.py        dust, sparkles, hearts, Zzz, music notes, wisps
   window_probe.py   X11 active-window probe (browser/terminal detection)
+  wellness.py       meal/water/break schedule + snooze logic (pure, unit-tested)
+  toast.py          reminder card with Done/Snooze next to the buddy
+  sound.py          generated chimes, played via paplay/pw-play/aplay
   prefs.py          preferences dialog + live preview
   tray.py           tray icon and shared context menu
   config.py         JSON settings, themes, validation
@@ -209,6 +242,15 @@ The behaviour engine (`behavior.py`) has no Qt dependency, so the physics and
 state machine can be tested headlessly.
 
 ## Changelog
+
+**1.2.0**
+- Wellness reminders: breakfast, lunch, snack, dinner, wind-down, water and
+  stretch breaks, with active hours, grace window, snooze and daily state.
+- Reminder cards with Done / Snooze buttons beside the buddy, plus themed
+  animations (water droplets, hearts, music notes, Zzz) and generated chimes.
+- Tray "Reminders" menu, preferences group with time pickers and interval
+  sliders, and `remind` / `reminders` CLI commands.
+- `status` now reports the reminder card state for troubleshooting.
 
 **1.1.0**
 - New character: **Boo-ombastic** the ghost (floaty physics, dance mode, music

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QRectF, Qt, QTimer
+from PyQt6.QtCore import QRectF, QTime, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -12,10 +12,13 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QSlider,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -163,6 +166,49 @@ class PreferencesDialog(QDialog):
         self.check_sleep.toggled.connect(controller.set_can_sleep)
         self.check_perch.toggled.connect(controller.set_perch_on_windows)
 
+        reminders_group = QGroupBox("Wellness reminders")
+        reminders_grid = QGridLayout(reminders_group)
+        self.check_reminders = QCheckBox("Remind me to eat, drink and stretch")
+        self.check_chime = QCheckBox("Gentle chime")
+        reminders_grid.addWidget(self.check_reminders, 0, 0, 1, 3)
+        reminders_grid.addWidget(self.check_chime, 1, 0, 1, 3)
+        self.check_reminders.toggled.connect(self._on_reminders_enabled)
+        self.check_chime.toggled.connect(self._on_reminder_sound)
+        self.meal_widgets: dict[str, tuple[QCheckBox, QTimeEdit]] = {}
+        meals = (
+            ("breakfast", "Breakfast"),
+            ("lunch", "Lunch"),
+            ("snack", "Snack"),
+            ("dinner", "Dinner"),
+            ("winddown", "Wind down"),
+        )
+        for row, (key, label) in enumerate(meals, start=2):
+            check = QCheckBox(label)
+            edit = QTimeEdit()
+            edit.setDisplayFormat("HH:mm")
+            check.toggled.connect(
+                lambda value, k=key: self._on_meal_enabled(k, value)
+            )
+            edit.timeChanged.connect(lambda value, k=key: self._on_meal_time(k, value))
+            reminders_grid.addWidget(check, row, 0)
+            reminders_grid.addWidget(edit, row, 1)
+            self.meal_widgets[key] = (check, edit)
+
+        self.water_slider, self.water_label, water_row = self._slider_row(
+            10, 180, int(controller.config.water_interval_minutes), " min"
+        )
+        self.water_slider.valueChanged.connect(self._on_water_interval)
+        self.break_slider, self.break_label, break_row = self._slider_row(
+            20, 240, int(controller.config.break_interval_minutes), " min"
+        )
+        self.break_slider.valueChanged.connect(self._on_break_interval)
+        row = len(meals) + 2
+        reminders_grid.addWidget(QLabel("Water every"), row, 0)
+        reminders_grid.addWidget(water_row, row, 1, 1, 2)
+        reminders_grid.addWidget(QLabel("Stretch every"), row + 1, 0)
+        reminders_grid.addWidget(break_row, row + 1, 1, 1, 2)
+        layout.addWidget(reminders_group)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -215,6 +261,14 @@ class PreferencesDialog(QDialog):
         self.check_playful.setChecked(config.playful)
         self.check_sleep.setChecked(config.can_sleep)
         self.check_perch.setChecked(config.perch_on_windows)
+        self.check_reminders.setChecked(config.reminders_enabled)
+        self.check_chime.setChecked(config.reminder_sound)
+        for key, (check, edit) in self.meal_widgets.items():
+            check.setChecked(bool(getattr(config, f"{key}_enabled", True)))
+            stored = getattr(config, f"{key}_time", "09:00")
+            edit.setTime(QTime.fromString(stored, "HH:mm"))
+        self.water_slider.setValue(int(config.water_interval_minutes))
+        self.break_slider.setValue(int(config.break_interval_minutes))
         self.preview.refresh()
 
     # ------------------------------------------------------------------- events
@@ -258,6 +312,33 @@ class PreferencesDialog(QDialog):
         if key:
             self.controller.set_species(str(key))
             self.preview.refresh()
+
+    # ---------------------------------------------------------------- reminders
+    def _on_reminders_enabled(self, value: bool) -> None:
+        if not self._loading:
+            self.controller.set_reminders_enabled(value)
+
+    def _on_reminder_sound(self, value: bool) -> None:
+        if not self._loading:
+            self.controller.set_reminder_sound(value)
+
+    def _on_meal_enabled(self, key: str, value: bool) -> None:
+        if not self._loading:
+            self.controller.set_meal_enabled(key, value)
+
+    def _on_meal_time(self, key: str, value: QTime) -> None:
+        if not self._loading:
+            self.controller.set_meal_time(key, value.toString("HH:mm"))
+
+    def _on_water_interval(self, value: int) -> None:
+        self.water_label.setText(f"{value} min")
+        if not self._loading:
+            self.controller.set_water_interval(value)
+
+    def _on_break_interval(self, value: int) -> None:
+        self.break_label.setText(f"{value} min")
+        if not self._loading:
+            self.controller.set_break_interval(value)
 
     def _accept(self) -> None:
         self.controller.save_config()

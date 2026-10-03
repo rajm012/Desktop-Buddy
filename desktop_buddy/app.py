@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import ctypes.util
+import json
 import logging
 import os
+import random
 import signal
 import sys
 import time
 from contextlib import suppress
 from dataclasses import fields
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
@@ -19,7 +22,8 @@ from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_SLUG, __version__
-from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
+from .character import Palette
+from .config import CONFIG_PATH, LOG_PATH, SPECIES, STATE_DIR, Config
 from .platform_utils import (
     autostart_enabled,
     autostart_file,
@@ -32,7 +36,10 @@ from .platform_utils import (
     which_launcher,
 )
 from .prefs import PreferencesDialog
+from .sound import play_chime
+from .toast import ReminderToast
 from .tray import BuddyTray
+from .wellness import Reminder, ReminderState, WellnessEngine
 from .window import BuddyWindow
 
 log = logging.getLogger(__name__)
@@ -89,14 +96,14 @@ def send_command(command: str, timeout_ms: int = 900) -> bool:
     return True
 
 
-def request_status(timeout_ms: int = 1200) -> str | None:
-    """Ask a running instance for a one-line status report."""
+def request_reply(command: str, timeout_ms: int = 1400) -> str | None:
+    """Send a command to a running instance and read its reply."""
     _ensure_core_app()
     socket = QLocalSocket()
     socket.connectToServer(server_name())
     if not socket.waitForConnected(timeout_ms):
         return None
-    socket.write(b"status\n")
+    socket.write((command + "\n").encode("utf-8"))
     socket.flush()
     socket.waitForBytesWritten(timeout_ms)
     reply = b""
@@ -109,6 +116,11 @@ def request_status(timeout_ms: int = 1200) -> str | None:
     socket.disconnectFromServer()
     text = reply.decode("utf-8", "replace").strip()
     return text or None
+
+
+def request_status(timeout_ms: int = 1400) -> str | None:
+    """Ask a running instance for a one-line status report."""
+    return request_reply("status", timeout_ms)
 
 
 class Controller(QObject):
@@ -127,11 +139,21 @@ class Controller(QObject):
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self.save_config)
+        self._rng = random.Random()
+        self._wellness_path = STATE_DIR / "reminders.json"
+        self._wellness = self._build_wellness()
+        self._toast: ReminderToast | None = None
+        self._toast_queue: list[tuple[Reminder, str]] = []
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(20_000)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+        self._reminder_timer.start()
         self._server = self._start_ipc()
 
         if self.tray.icon is not None:
             self.tray.icon.show()
         self.window.show()
+        QTimer.singleShot(6000, self._check_reminders)
         if first_run:
             QTimer.singleShot(1200, self._greet)
 
@@ -154,12 +176,14 @@ class Controller(QObject):
         for field_info in fields(Config):
             setattr(self.config, field_info.name, getattr(restored, field_info.name))
         self.window.apply_config()
+        self._rebuild_wellness()
         self.tray.refresh()
         self._schedule_save()
 
     def reset_config(self) -> None:
         self.config.reset()
         self.window.apply_config()
+        self._rebuild_wellness()
         self.tray.refresh()
         self._schedule_save()
 
@@ -265,6 +289,174 @@ class Controller(QObject):
         if enabled:
             self.window.say("I'll keep an eye on your windows!", 3.0)
 
+    # -------------------------------------------------------------- reminders
+    def _build_wellness(self) -> WellnessEngine:
+        state = ReminderState()
+        try:
+            if self._wellness_path.is_file():
+                state = ReminderState.from_dict(
+                    json.loads(self._wellness_path.read_text(encoding="utf-8"))
+                )
+        except (OSError, ValueError):
+            state = ReminderState()
+        return WellnessEngine(self.config, state, self._rng)
+
+    def _rebuild_wellness(self) -> None:
+        self._wellness = WellnessEngine(
+            self.config, self._wellness.state, self._rng
+        )
+
+    def _save_wellness(self) -> None:
+        try:
+            self._wellness_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._wellness_path.with_suffix(".json.tmp")
+            tmp.write_text(
+                json.dumps(self._wellness.state.to_dict(), indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(tmp, self._wellness_path)
+        except OSError as exc:
+            log.warning("Could not save reminder state: %s", exc)
+
+    def _check_reminders(self) -> None:
+        if not self.config.reminders_enabled:
+            return
+        now = datetime.now()
+        for reminder in self._wellness.due(now):
+            self._wellness.mark_done(reminder, now)
+            self._save_wellness()
+            self._fire_reminder(reminder)
+
+    def _fire_reminder(self, reminder: Reminder, manual: bool = False) -> None:
+        message = reminder.pick_message(self._rng)
+        short = {
+            "water": "Water break! 💧",
+            "meal": f"{reminder.title} time! {reminder.icon}",
+            "break": "Stretch break! 🧘",
+            "winddown": "Wind down 🌙",
+        }.get(reminder.kind, f"{reminder.title}!")
+        self.window.remind(reminder.kind, short)
+        if self.config.reminder_sound:
+            play_chime(reminder.kind, STATE_DIR)
+        self._queue_toast(reminder, message)
+        if manual:
+            log.info("Manual reminder: %s", reminder.id)
+
+    def remind_now(self, key: str) -> bool:
+        reminder = self._wellness.find(key)
+        if reminder is None:
+            return False
+        self._fire_reminder(reminder, manual=True)
+        return True
+
+    def _queue_toast(self, reminder: Reminder, message: str) -> None:
+        log.info("Queueing reminder toast: %s", reminder.id)
+        self._toast_queue.append((reminder, message))
+        if self._toast is None:
+            self._show_next_toast()
+
+    def _show_next_toast(self) -> None:
+        if self._toast is not None or not self._toast_queue:
+            return
+        reminder, message = self._toast_queue.pop(0)
+        log.info("Showing reminder toast: %s", reminder.id)
+        palette = Palette.from_colors(self.config.theme_colors())
+        toast = ReminderToast(
+            reminder,
+            message,
+            palette,
+            self._buddy_anchor,
+            self._toast_done,
+            self._toast_snooze,
+            self._toast_dismiss,
+            snooze_minutes=self.config.snooze_minutes or reminder.snooze_minutes,
+        )
+        toast.closed.connect(self._on_toast_closed)
+        self._toast = toast
+        toast.show_near_buddy()
+
+    def _on_toast_closed(self) -> None:
+        self._toast = None
+        QTimer.singleShot(500, self._show_next_toast)
+
+    def _buddy_anchor(self) -> tuple[int, int, int, int]:
+        window = self.window
+        return (window.x(), window.y(), window.width(), window.height())
+
+    def _toast_done(self, reminder: Reminder) -> None:
+        self._wellness.mark_done(reminder)
+        self._save_wellness()
+        self.window.say("Noted! ✅", 3.0)
+
+    def _toast_snooze(self, reminder: Reminder) -> None:
+        minutes = self.config.snooze_minutes or reminder.snooze_minutes
+        self._wellness.snooze(reminder, minutes)
+        self._save_wellness()
+        self.window.say(f"Snoozed {minutes} min 😴", 3.0)
+
+    def _toast_dismiss(self, reminder: Reminder) -> None:
+        self._wellness.mark_done(reminder)
+        self._save_wellness()
+
+    def reminders_summary(self, count: int = 6) -> str:
+        if not self.config.reminders_enabled:
+            return "Wellness reminders are off."
+        entries = self._wellness.upcoming(count)
+        if not entries:
+            return "No reminders configured."
+        lines = [
+            f"{when.strftime('%a %H:%M')}   {reminder.icon} {reminder.title}"
+            for when, reminder in entries
+        ]
+        return "Upcoming reminders:\n\n" + "\n".join(lines)
+
+    def show_reminders(self, *_args: object) -> None:
+        QMessageBox.information(
+            None, "Desktop Buddy — Reminders", self.reminders_summary(7)
+        )
+
+    def set_reminders_enabled(self, enabled: bool) -> None:
+        self.config.reminders_enabled = bool(enabled)
+        self._rebuild_wellness()
+        self.tray.refresh()
+        self._schedule_save()
+        if enabled:
+            self.window.say("I'll remind you to eat and drink! 🍎💧", 4.0)
+
+    def set_reminder_sound(self, enabled: bool) -> None:
+        self.config.reminder_sound = bool(enabled)
+        self.tray.refresh()
+        self._schedule_save()
+
+    def set_meal_time(self, key: str, value: str) -> None:
+        field = f"{key}_time"
+        if not hasattr(self.config, field):
+            return
+        setattr(self.config, field, value)
+        self.config.normalize()
+        self._rebuild_wellness()
+        self._schedule_save()
+
+    def set_meal_enabled(self, key: str, enabled: bool) -> None:
+        field = f"{key}_enabled"
+        if not hasattr(self.config, field):
+            return
+        setattr(self.config, field, bool(enabled))
+        self._rebuild_wellness()
+        self._schedule_save()
+
+    def set_water_interval(self, minutes: int) -> None:
+        self.config.water_interval_minutes = int(minutes)
+        self.config.normalize()
+        self._rebuild_wellness()
+        self._schedule_save()
+
+    def set_break_interval(self, minutes: int) -> None:
+        self.config.break_interval_minutes = int(minutes)
+        self.config.normalize()
+        self._rebuild_wellness()
+        self._schedule_save()
+
     def set_autostart(self, enabled: bool) -> None:
         enabled = bool(enabled)
         try:
@@ -339,6 +531,7 @@ class Controller(QObject):
 
     def quit(self, *_args: object) -> None:
         self.save_config()
+        self._save_wellness()
         if self.tray.icon is not None:
             self.tray.icon.hide()
         self.app.quit()
@@ -395,6 +588,17 @@ class Controller(QObject):
             self.dance()
         elif verb == "character" and len(parts) > 1:
             self.set_species(parts[1])
+        elif verb == "remind" and len(parts) > 1:
+            if self.remind_now(parts[1]):
+                return f"reminder fired: {parts[1]}"
+            return f"unknown reminder: {parts[1]}"
+        elif verb == "reminders" and len(parts) > 1:
+            if parts[1] == "status":
+                return self.reminders_summary(6)
+            if parts[1] in ("on", "off"):
+                self.set_reminders_enabled(parts[1] == "on")
+                return f"reminders {parts[1]}"
+            return "usage: reminders on|off|status"
         elif verb == "click-through" and len(parts) > 1:
             self.set_click_through(parts[1] == "on")
         elif verb == "autostart" and len(parts) > 1:
@@ -405,6 +609,18 @@ class Controller(QObject):
         brain = self.window._brain  # noqa: SLF001 - diagnostic view
         screen_ground = brain.screen_world.ground if brain.screen_world else -1.0
         cooldown = max(0.0, self.window._perch_cooldown_until - time.monotonic())
+        toast = self._toast
+        if toast is None:
+            toast_info = "-"
+        else:
+            try:
+                toast_id = hex(int(toast.winId()))
+            except Exception:  # noqa: BLE001
+                toast_id = "?"
+            toast_info = (
+                f"{'visible' if toast.isVisible() else 'hidden'} id={toast_id} "
+                f"geom=({toast.x()},{toast.y()},{toast.width()}x{toast.height()})"
+            )
         return (
             f"state={brain.state.value} x={brain.x:.0f} y={brain.y:.0f} "
             f"world=({brain.world.left:.0f}..{brain.world.right:.0f},"
@@ -415,6 +631,7 @@ class Controller(QObject):
             f"feet_local={self.window._feet_local_px:.1f} "  # noqa: SLF001
             f"dpr={self.window.devicePixelRatioF():.2f} "
             f"presses={self.window._press_count} "  # noqa: SLF001
+            f"toast={toast_info} "
             f"species={self.config.species} visible={self.window.isVisible()} "
             f"paused={self.window.is_paused}"
         )
@@ -529,6 +746,13 @@ def build_parser() -> argparse.ArgumentParser:
         ("settings", "open the preferences window"),
     ):
         sub.add_parser(name, help=help_text)
+    remind = sub.add_parser("remind", help="fire a wellness reminder now")
+    remind.add_argument(
+        "value",
+        choices=("breakfast", "lunch", "snack", "dinner", "water", "break", "winddown"),
+    )
+    reminders = sub.add_parser("reminders", help="manage wellness reminders")
+    reminders.add_argument("value", choices=("on", "off", "status"))
     character = sub.add_parser("character", help="switch character")
     character.add_argument("value", choices=tuple(SPECIES))
     click = sub.add_parser("click-through", help="toggle input pass-through")
@@ -550,6 +774,29 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose)
 
     if args.command is not None:
+        if args.command == "remind":
+            reply = request_reply(f"remind {args.value}")
+            if reply:
+                print(reply)
+                return 0
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
+        if args.command == "reminders":
+            if args.value == "status":
+                reply = request_reply("reminders status")
+                if reply:
+                    print(reply)
+                    return 0
+                print("Desktop Buddy is not running.", file=sys.stderr)
+                return 1
+            if send_command(f"reminders {args.value}"):
+                print(f"Reminders {args.value}")
+                return 0
+            config = Config.load()
+            config.reminders_enabled = args.value == "on"
+            config.save()
+            print(f"Reminders {args.value} (applies next time it starts)")
+            return 0
         if args.command == "status":
             reply = request_status()
             if reply:
@@ -613,7 +860,8 @@ def main(argv: list[str] | None = None) -> int:
             CONFIG_PATH.unlink()
         print(f"Removed {CONFIG_PATH}")
 
-    if send_command("show"):
+    if request_reply("status", timeout_ms=700):
+        send_command("show")
         print("Desktop Buddy is already running (showing it).")
         return 0
 

@@ -98,6 +98,18 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+def _valid_time(value: object, fallback: str) -> str:
+    for candidate in (value, fallback):
+        try:
+            hours, minutes = str(candidate).strip().split(":", 1)
+            hour, minute = int(hours), int(minutes)
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return f"{hour:02d}:{minute:02d}"
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return "09:00"
+
+
 @dataclass
 class Config:
     """User-facing settings, persisted as JSON."""
@@ -116,6 +128,26 @@ class Config:
     sleep_after: float = 180.0
     perch_on_windows: bool = True
     perch_delay: float = 1.2
+    reminders_enabled: bool = True
+    reminder_sound: bool = True
+    breakfast_enabled: bool = True
+    breakfast_time: str = "09:00"
+    lunch_enabled: bool = True
+    lunch_time: str = "13:30"
+    snack_enabled: bool = True
+    snack_time: str = "16:30"
+    dinner_enabled: bool = True
+    dinner_time: str = "21:00"
+    winddown_enabled: bool = True
+    winddown_time: str = "23:00"
+    water_enabled: bool = True
+    water_interval_minutes: int = 45
+    break_enabled: bool = True
+    break_interval_minutes: int = 60
+    active_start: str = "09:00"
+    active_end: str = "22:30"
+    reminder_grace_minutes: int = 45
+    snooze_minutes: int = 10
     autostart: bool = False
     paused: bool = False
     position_x: float | None = None
@@ -183,6 +215,15 @@ class Config:
             "playful",
             "can_sleep",
             "perch_on_windows",
+            "reminders_enabled",
+            "reminder_sound",
+            "breakfast_enabled",
+            "lunch_enabled",
+            "snack_enabled",
+            "dinner_enabled",
+            "winddown_enabled",
+            "water_enabled",
+            "break_enabled",
             "autostart",
             "paused",
         ):
@@ -195,6 +236,35 @@ class Config:
             self.perch_delay = _clamp(float(self.perch_delay), 0.3, 10.0)
         except (TypeError, ValueError):
             self.perch_delay = 1.2
+        self.breakfast_time = _valid_time(self.breakfast_time, "09:00")
+        self.lunch_time = _valid_time(self.lunch_time, "13:30")
+        self.snack_time = _valid_time(self.snack_time, "16:30")
+        self.dinner_time = _valid_time(self.dinner_time, "21:00")
+        self.winddown_time = _valid_time(self.winddown_time, "23:00")
+        self.active_start = _valid_time(self.active_start, "09:00")
+        self.active_end = _valid_time(self.active_end, "22:30")
+        try:
+            self.water_interval_minutes = int(
+                _clamp(int(self.water_interval_minutes), 10, 180)
+            )
+        except (TypeError, ValueError):
+            self.water_interval_minutes = 45
+        try:
+            self.break_interval_minutes = int(
+                _clamp(int(self.break_interval_minutes), 20, 240)
+            )
+        except (TypeError, ValueError):
+            self.break_interval_minutes = 60
+        try:
+            self.reminder_grace_minutes = int(
+                _clamp(int(self.reminder_grace_minutes), 5, 180)
+            )
+        except (TypeError, ValueError):
+            self.reminder_grace_minutes = 45
+        try:
+            self.snooze_minutes = int(_clamp(int(self.snooze_minutes), 1, 60))
+        except (TypeError, ValueError):
+            self.snooze_minutes = 10
         if self.position_x is not None:
             try:
                 self.position_x = float(self.position_x)
