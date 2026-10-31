@@ -37,6 +37,7 @@ def poses() -> list[tuple[str, Brain, list[tuple[str, float, float]]]]:
         ("walk", make_brain(State.WALK, anim_time=0.42, look=(0.6, 0.0)), []),
         ("run", make_brain(State.RUN, anim_time=0.31, look=(0.8, -0.1)), []),
         ("jump", make_brain(State.AIR, vy=-260.0), [("sparkles", 0.0, -20.0)]),
+        ("fall", make_brain(State.AIR, anim_time=0.35, vy=320.0), []),
         ("land", make_brain(State.LAND, state_time=0.07, last_impact=650.0), [("dust", 0.0, -2.0)]),
         ("dance", make_brain(State.DANCE, anim_time=0.62, can_dance=True), [("notes", 8.0, -80.0), ("hearts", 0.0, -64.0)]),
         ("sleep", make_brain(State.SLEEP, anim_time=1.1), [("zzz", 24.0, -78.0)]),
@@ -46,10 +47,12 @@ def poses() -> list[tuple[str, Brain, list[tuple[str, float, float]]]]:
 
 def main() -> int:
     output = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/buddy-preview.png")
-    species = sys.argv[2] if len(sys.argv) > 2 else "ghost"
+    species = sys.argv[2] if len(sys.argv) > 2 else "robot"
     palette_colors = THEMES["mint"]
     if species == "ghost":
         palette_colors = THEMES["lavender"]
+    elif species == "robot":
+        palette_colors = THEMES["circuit"]
 
     app = QGuiApplication([])  # noqa: F841
     sheet = poses()

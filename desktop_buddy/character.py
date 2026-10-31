@@ -543,8 +543,374 @@ class Ghost:
             painter.drawPath(mouth)
 
 
+class Robot:
+    """Bolt: a soft-edged desktop robot with a large expressive screen face."""
+
+    def __init__(self, palette: Palette) -> None:
+        self.palette = palette
+
+    def set_palette(self, palette: Palette) -> None:
+        self.palette = palette
+
+    def paint(
+        self,
+        painter: QPainter,
+        brain: Brain,
+        width: int,
+        height: int,
+        foot_pad: float = FOOT_PAD_UNITS,
+    ) -> None:
+        unit = max(0.1, width / CANVAS_W)
+        painter.save()
+        painter.translate(width / 2.0, height - foot_pad * unit)
+        painter.scale(unit, unit)
+        self.paint_scene(painter, brain, unit)
+        painter.restore()
+
+    def paint_scene(self, painter: QPainter, brain: Brain, unit: float) -> None:
+        _paint_ground_shadow(
+            painter, brain, unit, self.palette.outline, base_rx=34.0, base_ry=6.0
+        )
+        painter.save()
+        dancing = brain.state is State.DANCE
+        sleeping = brain.state is State.SLEEP
+        bob = self._walk_bob(brain)
+        if sleeping:
+            bob += 7.0
+        elif brain.state is State.IDLE:
+            # Tiny continuous motion prevents the robot from feeling switched off.
+            bob += math.sin(brain.anim_time * 1.7) * 0.7
+        painter.translate(0.0, bob)
+        if dancing:
+            swing = math.sin(brain.anim_time * 7.2)
+            painter.translate(0.0, -abs(swing) * 5.0)
+            painter.rotate(swing * 8.0)
+        elif brain.state is State.RUN:
+            # A forward pitch sells momentum; a smaller counter-sway keeps it lively.
+            stride = math.sin(self._walk_cycle(brain))
+            painter.rotate(5.5 + stride * 2.0)
+        elif brain.state is State.WALK:
+            painter.rotate(math.sin(self._walk_cycle(brain)) * 1.8)
+        elif brain.state is State.AIR:
+            # The body leads on take-off and braces slightly on descent.
+            air_tilt = -4.0 if brain.vy < -80.0 else 3.0 if brain.vy > 100.0 else 0.0
+            painter.rotate(air_tilt)
+        sx, sy = self._squash(brain)
+        painter.scale(float(brain.facing), 1.0)
+        painter.scale(sx, sy)
+        self._paint_arms(painter, brain)
+        self._paint_legs(painter, brain)
+        self._paint_body(painter, brain)
+        self._paint_neck(painter, brain)
+        self._paint_head(painter, brain)
+        painter.restore()
+
+    def paint_icon(self, painter: QPainter, brain: Brain) -> None:
+        painter.translate(0.0, 8.0)
+        self._paint_body(painter, brain)
+        self._paint_neck(painter, brain)
+        self._paint_head(painter, brain)
+
+    def _walk_cycle(self, brain: Brain) -> float:
+        if brain.state is State.WALK:
+            speed = 8.0
+        elif brain.state is State.RUN:
+            speed = 13.0
+        elif brain.state is State.DRAG:
+            speed = 5.0
+        else:
+            speed = 0.0
+        return brain.anim_time * speed * max(0.6, brain.speed_scale)
+
+    def _walk_bob(self, brain: Brain) -> float:
+        if brain.state not in (State.WALK, State.RUN):
+            return 0.0
+        return -abs(math.sin(self._walk_cycle(brain))) * 3.0
+
+    def _squash(self, brain: Brain) -> tuple[float, float]:
+        if brain.state is State.LAND:
+            duration = max(0.001, brain.tuning.land_duration)
+            progress = min(1.0, brain.state_time / duration)
+            amount = math.sin(math.pi * progress) * 0.14
+            return 1.0 + amount, 1.0 - amount
+        if brain.state is State.AIR:
+            stretch = min(0.13, abs(brain.vy) / 1600.0)
+            if brain.vy < 0.0:
+                return 1.0 - stretch * 0.4, 1.0 + stretch
+            # A little width on the way down reads as preparing for impact.
+            return 1.0 + stretch * 0.22, 1.0 - stretch * 0.18
+        return 1.0, 1.0
+
+    def _metal(self) -> QColor:
+        metal = QColor(self.palette.belly)
+        return metal.darker(108)
+
+    def _joint(
+        self, painter: QPainter, point: QPointF, radius: float = 4.2
+    ) -> None:
+        painter.setBrush(self.palette.body_dark)
+        painter.setPen(_pen(self.palette.outline, 1.5))
+        painter.drawEllipse(point, radius, radius)
+        painter.setBrush(self.palette.outline)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(point, radius * 0.31, radius * 0.31)
+
+    def _paint_legs(self, painter: QPainter, brain: Brain) -> None:
+        phase = self._walk_cycle(brain)
+        sleeping = brain.state is State.SLEEP
+        airborne = brain.state in (State.AIR, State.DRAG, State.CLIMB)
+        for side in (-1, 1):
+            swing = math.sin(phase + (0.0 if side < 0 else math.pi))
+            foot_x = side * 17.0 + swing * 6.0
+            lift = max(0.0, swing) * 6.0
+            hip = QPointF(side * 13.0, -43.0)
+            knee = QPointF(side * 15.0 + swing * 3.0, -25.0 - lift * 0.35)
+            ankle = QPointF(foot_x, -10.0 - lift)
+            if sleeping:
+                knee = QPointF(side * 20.0, -20.0)
+                ankle = QPointF(side * 23.0, -8.0)
+            elif airborne:
+                knee = QPointF(side * 18.0, -27.0)
+                ankle = QPointF(side * 21.0, -17.0)
+
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            # Three nested strokes make each leg read as a molded mechanical
+            # assembly instead of a thin wire between body and boot.
+            painter.setPen(_pen(self.palette.outline, 16.0))
+            painter.drawLine(hip, knee)
+            painter.drawLine(knee, ankle)
+            painter.setPen(_pen(self.palette.body_dark, 11.5))
+            painter.drawLine(hip, knee)
+            painter.drawLine(knee, ankle)
+            painter.setPen(_pen(self.palette.body, 7.0))
+            painter.drawLine(hip, knee)
+            painter.drawLine(knee, ankle)
+            self._joint(painter, hip, 6.0)
+            self._joint(painter, knee, 5.5)
+
+            # Deep, blocky boots are the visual counterweight to the large head.
+            boot = QPainterPath()
+            boot.moveTo(ankle.x() - 10.0, ankle.y() - 3.0)
+            boot.lineTo(ankle.x() + 9.0, ankle.y() - 3.0)
+            boot.lineTo(ankle.x() + 15.0, ankle.y() + 14.0)
+            boot.lineTo(ankle.x() - 15.0, ankle.y() + 14.0)
+            boot.closeSubpath()
+            gradient = QLinearGradient(0.0, ankle.y() - 3.0, 0.0, ankle.y() + 14.0)
+            gradient.setColorAt(0.0, self.palette.belly)
+            gradient.setColorAt(1.0, self.palette.body_dark)
+            painter.setBrush(QBrush(gradient))
+            painter.setPen(_pen(self.palette.outline, 2.0))
+            painter.drawPath(boot)
+            painter.setBrush(self.palette.body)
+            painter.drawRoundedRect(
+                QRectF(ankle.x() - 16.5, ankle.y() + 10.0, 33.0, 8.0), 3.0, 3.0
+            )
+            painter.setPen(_pen(self.palette.outline, 1.2))
+            painter.drawLine(
+                QPointF(ankle.x() - 13.0, ankle.y() + 14.0),
+                QPointF(ankle.x() + 13.0, ankle.y() + 14.0),
+            )
+
+    def _paint_body(self, painter: QPainter, brain: Brain) -> None:
+        sleeping = brain.state is State.SLEEP
+        body_y = -46.0 if not sleeping else -42.0
+
+        # A small dark waist keeps the otherwise seamless shell readable.
+        painter.setBrush(self.palette.outline)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(-17.0, body_y + 1.0, 34.0, 11.0), 5.0, 5.0)
+
+        gradient = QLinearGradient(-12.0, body_y - 35.0, 18.0, body_y + 1.0)
+        gradient.setColorAt(0.0, self.palette.belly)
+        gradient.setColorAt(0.55, self.palette.body)
+        gradient.setColorAt(1.0, self.palette.body_dark)
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(_pen(self.palette.outline, 2.0))
+        painter.drawRoundedRect(QRectF(-24.0, body_y - 35.0, 48.0, 37.0), 12.0, 12.0)
+
+        # Recessed status pill from the reference robot's chest.
+        painter.setBrush(self.palette.body_dark)
+        painter.setPen(_pen(self.palette.outline, 1.0))
+        painter.drawRoundedRect(QRectF(-7.0, body_y - 25.0, 14.0, 7.0), 3.5, 3.5)
+        light = QColor(self.palette.blush)
+        light.setAlpha(210)
+        painter.setBrush(light)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(0.0, body_y - 21.5), 1.5, 1.5)
+
+    def _paint_arms(self, painter: QPainter, brain: Brain) -> None:
+        phase = self._walk_cycle(brain)
+        dancing = brain.state is State.DANCE
+        airborne = brain.state is State.AIR
+        landing = brain.state is State.LAND
+        climbing = brain.state is State.CLIMB
+        for side in (-1, 1):
+            # Angles are explicit per arm. The previous side multiplication made
+            # both shoulders rotate in the same screen direction, hiding one arm.
+            limb_phase = math.sin(phase + (0.0 if side > 0 else math.pi))
+            rotation = limb_phase * (18.0 if brain.state is State.RUN else 10.0)
+            if dancing:
+                pulse = math.sin(brain.anim_time * 6.2 + side * 0.7)
+                rotation = -side * (58.0 + pulse * 25.0)
+            elif airborne:
+                # Both arms rise for take-off, float near the apex, then open
+                # wider to brace for landing. A tiny phase offset avoids rigidity.
+                if brain.vy < -100.0:
+                    lift = 100.0
+                elif brain.vy > 120.0:
+                    lift = 68.0
+                else:
+                    lift = 86.0
+                follow = math.sin(brain.anim_time * 5.0 + side * 0.45) * 6.0
+                rotation = -side * (lift + follow)
+            elif landing:
+                duration = max(0.001, brain.tuning.land_duration)
+                impact = math.sin(math.pi * min(1.0, brain.state_time / duration))
+                rotation = -side * (34.0 + impact * 24.0)
+            elif climbing:
+                reach = math.sin(brain.anim_time * 8.0 + (0.0 if side < 0 else math.pi))
+                rotation = -side * (62.0 + reach * 28.0)
+            elif brain.state is State.SLEEP:
+                rotation = -side * 8.0
+            elif brain.state is State.DRAG:
+                rotation = -side * (45.0 + math.sin(brain.anim_time * 4.0) * 8.0)
+            elif brain.state is State.IDLE:
+                rotation = -side * (
+                    2.5 + math.sin(brain.anim_time * 1.7 + side * 0.5) * 1.8
+                )
+            painter.save()
+            painter.translate(side * 23.0, -70.0)
+            painter.rotate(rotation)
+            painter.setBrush(self.palette.outline)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(QRectF(-3.5, -1.0, 7.0, 12.0), 3.0, 3.0)
+            self._joint(painter, QPointF(0.0, 1.0), 3.5)
+            gradient = QLinearGradient(-5.0, 8.0, 5.0, 31.0)
+            gradient.setColorAt(0.0, self.palette.belly)
+            gradient.setColorAt(1.0, self.palette.body_dark)
+            painter.setBrush(QBrush(gradient))
+            painter.setPen(_pen(self.palette.outline, 1.8))
+            painter.drawRoundedRect(QRectF(-7.0, 7.0, 14.0, 26.0), 6.0, 6.0)
+            painter.restore()
+
+    def _paint_neck(self, painter: QPainter, brain: Brain) -> None:
+        base = -80.0 if brain.state is not State.SLEEP else -74.0
+        painter.setBrush(self.palette.outline)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(-9.0, base - 10.0, 18.0, 12.0), 5.0, 5.0)
+        painter.setBrush(self.palette.body_dark)
+        painter.drawRoundedRect(QRectF(-6.0, base - 8.0, 12.0, 8.0), 4.0, 4.0)
+
+    def _paint_head(self, painter: QPainter, brain: Brain) -> None:
+        sleeping = brain.state is State.SLEEP
+        dancing = brain.state is State.DANCE
+        surprised = brain.state in (State.AIR, State.DRAG, State.CLIMB)
+        head_y = -130.0 if not sleeping else -122.0
+        nod = 0.0
+        if sleeping:
+            nod = 7.0 + math.sin(brain.anim_time * 1.2) * 2.0
+        elif dancing:
+            nod = math.sin(brain.anim_time * 7.2) * 4.0
+        elif brain.state in (State.WALK, State.RUN):
+            # Head lag adds follow-through against the body's stride.
+            nod = -math.sin(self._walk_cycle(brain)) * (
+                3.0 if brain.state is State.RUN else 1.8
+            )
+        elif brain.state is State.AIR:
+            nod = 4.0 if brain.vy < -100.0 else -3.0 if brain.vy > 120.0 else 0.0
+        elif brain.state is State.LAND:
+            duration = max(0.001, brain.tuning.land_duration)
+            nod = math.sin(math.pi * min(1.0, brain.state_time / duration)) * 8.0
+        elif brain.state is State.IDLE:
+            nod = math.sin(brain.anim_time * 1.4) * 0.9
+
+        painter.save()
+        painter.translate(0.0, head_y + 30.0)
+        painter.rotate(nod)
+        painter.translate(0.0, -(head_y + 30.0))
+
+        # Side caps suggest the circular ear/hinge visible in the reference.
+        for side in (-1, 1):
+            painter.setBrush(self.palette.body_dark)
+            painter.setPen(_pen(self.palette.outline, 1.8))
+            painter.drawEllipse(QPointF(side * 36.0, head_y + 30.0), 8.0, 14.0)
+            painter.setBrush(self.palette.body)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(side * 36.0, head_y + 30.0), 4.8, 10.0)
+
+        gradient = QLinearGradient(-25.0, head_y, 25.0, head_y + 61.0)
+        gradient.setColorAt(0.0, self.palette.belly)
+        gradient.setColorAt(0.62, self.palette.body)
+        gradient.setColorAt(1.0, self.palette.body_dark)
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(_pen(self.palette.outline, 2.5))
+        painter.drawRoundedRect(QRectF(-39.0, head_y, 78.0, 61.0), 21.0, 21.0)
+
+        # Glossy black screen inset inside the molded white shell.
+        face_color = QColor(self.palette.outline)
+        face_color = face_color.darker(180)
+        painter.setBrush(face_color)
+        painter.setPen(_pen(self.palette.outline, 1.7))
+        painter.drawRoundedRect(QRectF(-32.0, head_y + 7.0, 64.0, 45.0), 15.0, 15.0)
+
+        gloss = QColor("#ffffff")
+        gloss.setAlpha(28)
+        painter.setBrush(gloss)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(-27.0, head_y + 11.0, 54.0, 8.0), 4.0, 4.0)
+
+        look_x = brain.look[0] * brain.facing
+        look_y = brain.look[1]
+        eye_y = head_y + 31.0 + look_y * 2.0
+        eye_color = QColor(self.palette.belly)
+        if dancing:
+            eye_color = QColor(self.palette.blush).lighter(112)
+        for side in (-1, 1):
+            eye_x = side * 13.0 + look_x * 3.0
+            current_eye_y = eye_y
+            if sleeping:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(_pen(eye_color, 3.2))
+                painter.drawArc(
+                    QRectF(eye_x - 7.0, current_eye_y - 1.0, 14.0, 7.0),
+                    200 * 16,
+                    140 * 16,
+                )
+                continue
+            rx = 8.0 if surprised else 7.0
+            ry = 12.0 if surprised else 10.5
+            if brain.state is State.AIR:
+                if brain.vy < -100.0:
+                    # Bright, tall eyes lead the take-off.
+                    ry += 1.5
+                    current_eye_y -= 1.0
+                elif brain.vy > 120.0:
+                    # Eyes settle lower while the arms prepare for impact.
+                    ry -= 1.0
+                    current_eye_y += 1.5
+            elif brain.state is State.LAND:
+                duration = max(0.001, brain.tuning.land_duration)
+                impact = math.sin(math.pi * min(1.0, brain.state_time / duration))
+                ry *= max(0.35, 1.0 - impact * 0.55)
+            if brain.blink > 0.04:
+                ry *= max(0.08, 1.0 - brain.blink)
+            painter.setBrush(eye_color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(eye_x, current_eye_y), rx, ry)
+
+        # Small sensor above the eyes, matching the reference's sparse face.
+        painter.setBrush(self.palette.body_dark)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(0.0, head_y + 13.0), 2.3, 2.3)
+        painter.setBrush(QColor("#7dd9df"))
+        painter.drawEllipse(QPointF(-0.5, head_y + 12.5), 0.8, 0.8)
+        painter.restore()
+
+
 def make_character(species: str, palette: Palette):
     """Factory: returns the renderer for a species key."""
+    if species == "robot":
+        return Robot(palette)
     if species == "ghost":
         return Ghost(palette)
     return Mochi(palette)

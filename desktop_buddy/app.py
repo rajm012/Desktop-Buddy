@@ -515,10 +515,10 @@ class Controller(QObject):
             "About Desktop Buddy",
             (
                 f"<h3>Desktop Buddy {__version__}</h3>"
-                "<p>A tiny creature that lives on your desktop.</p>"
+                "<p>A tiny robot or creature that lives on your desktop.</p>"
                 "<p><b>Tips</b><br>"
                 "&bull; Drag the buddy anywhere with the left mouse button<br>"
-                "&bull; Double-click: Boo dances, Mochi hops<br>"
+                "&bull; Double-click: Bolt and Boo dance; Mochi hops<br>"
                 "&bull; Right-click for the menu; Ctrl+wheel resizes<br>"
                 "&bull; It perches on your browser and terminal windows<br>"
                 "&bull; Switch characters from the tray menu<br>"

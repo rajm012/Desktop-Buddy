@@ -42,7 +42,7 @@ class PreferencesSmokeTests(unittest.TestCase):
         dialog = PreferencesDialog(controller)
         dialog.show()
         controller.config.theme = "peach"
-        controller.config.species = "mochi"
+        controller.config.species = "robot"
         dialog.preview.refresh()
         self.app.processEvents()
         dialog.close()

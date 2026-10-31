@@ -1,12 +1,12 @@
-# Desktop Buddy 👻🐾
+# Desktop Buddy 🤖👻🐾
 
 Tiny creatures that live on your Ubuntu desktop.
 
-**Boo-ombastic** is a floaty little ghost who drifts around, dances on your
-browser's search bar, hangs out near your terminal prompt, investigates your
-cursor, gets very excited when poked — and **looks after you** with gentle
-wellness reminders for meals, snacks, water and stretch breaks. **Mochi**, the original round
-blob-cat, is still available from the tray menu if you want the classic.
+**Bolt** is a soft-edged desktop robot with a large rounded screen face, two
+luminous eyes, a compact white shell and oversized boots. It walks around,
+dances on your browser's search bar, hangs out near your terminal prompt,
+investigates your cursor, and **looks after you** with gentle wellness reminders.
+**Boo-ombastic** the ghost and **Mochi** the original blob-cat remain available.
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 
@@ -24,8 +24,8 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
   it comes back down (tray → "Perch on browser/terminal" to disable)
 - **Drop it anywhere**: drag the buddy anywhere on the screen — floor, middle of
   the screen, top edge, on top of another window
-- **Two characters**: Boo-ombastic the ghost (floats, dances) and Mochi the cat
-  (jumps, wags) — switch live from the tray or with `desktop-buddy character ghost|mochi`
+- **Three characters**: Bolt the articulated robot, Boo-ombastic the ghost and
+  Mochi the cat — switch live from the tray or with `desktop-buddy character robot|ghost|mochi`
 - **Wellness reminders**: breakfast 09:00, lunch 13:30, optional snack 16:30,
   dinner 21:00, wind-down 23:00, water every 45 min and a stretch break every
   60 min (both only during your active hours, 09:00–22:30 by default)
@@ -80,7 +80,7 @@ Then:
 | Make it dance (Boo) | Double-click it, tray → Dance!, or `desktop-buddy dance` |
 | Menu | Right-click it, or click the tray icon |
 | Resize | `Ctrl` + mouse wheel |
-| Change character | Tray → Character → Boo-ombastic / Mochi |
+| Change character | Tray → Character → Bolt / Boo-ombastic / Mochi |
 | Wellness reminders | Tray → Reminders (on/off, chime, Water now, Stretch now, Upcoming…) |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
@@ -89,7 +89,7 @@ Then:
 ```bash
 desktop-buddy quit | show | hide | toggle | pause | resume | dance | settings
 desktop-buddy status                    # what is the buddy doing right now?
-desktop-buddy character ghost|mochi     # switch characters
+desktop-buddy character robot|ghost|mochi  # switch characters
 desktop-buddy reminders status          # next reminders, in order
 desktop-buddy reminders on|off          # pause/resume wellness reminders
 desktop-buddy remind water              # fire a reminder now (water/lunch/break/…)
@@ -110,8 +110,8 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `name` | `"Boo-ombastic"` | Displayed in the greeting/about |
-| `species` | `"ghost"` | `ghost` (Boo-ombastic) or `mochi` (the cat) |
+| `name` | `"Bolt"` | Displayed in the greeting/about |
+| `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"mint"` | `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
 | `scale` | `0.8` | 0.5 – 1.8 |
 | `speed` | `1.0` | 0.4 – 2.5 |
@@ -213,7 +213,7 @@ desktop_buddy/
   app.py            CLI, controller, single-instance IPC, diagnostics
   window.py         transparent always-on-top window, input, painting loop
   behavior.py       pure-python physics + state machine (unit-tested)
-  character.py      procedural QPainter creatures (Boo + Mochi)
+  character.py      procedural QPainter characters (Bolt + Boo + Mochi)
   effects.py        dust, sparkles, hearts, Zzz, music notes, wisps
   window_probe.py   X11 active-window probe (browser/terminal detection)
   wellness.py       meal/water/break schedule + snooze logic (pure, unit-tested)
@@ -242,6 +242,13 @@ The behaviour engine (`behavior.py`) has no Qt dependency, so the physics and
 state machine can be tested headlessly.
 
 ## Changelog
+
+**1.3.0**
+- New default character: **Bolt**, a soft-edged desktop companion with a large
+  expressive screen, luminous eyes, molded shell, oversized boots and
+  state-specific animation.
+- New Circuit White theme and robot artwork for the app icon, tray, live
+  preferences preview and pose-sheet tool. Boo and Mochi remain selectable.
 
 **1.2.0**
 - Wellness reminders: breakfast, lunch, snack, dinner, wind-down, water and

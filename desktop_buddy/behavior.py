@@ -178,7 +178,7 @@ class Brain:
             self._wake()
 
     def poke(self) -> list[Event]:
-        """Double-click interaction: dance (ghost) or a happy hop (cat)."""
+        """Double-click interaction: dance when supported, otherwise happy hop."""
         events: list[Event] = [Event.POKE]
         self.note_interaction()
         if self.state not in (State.AIR, State.DRAG, State.CLIMB, State.DANCE):

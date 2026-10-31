@@ -38,8 +38,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.scale, 1.8)
         self.assertEqual(config.speed, 0.4)
         self.assertEqual(config.fps, 30)
-        self.assertEqual(config.theme, "mint")
-        self.assertEqual(config.name, "Mochi")
+        self.assertEqual(config.theme, "circuit")
+        self.assertEqual(config.name, "Bolt")
 
     def test_reset_restores_defaults(self) -> None:
         config = Config()
@@ -57,19 +57,23 @@ class ConfigTests(unittest.TestCase):
             for color_key in ("body", "belly", "accent", "outline", "eye"):
                 self.assertIn(color_key, colors)
 
-    def test_old_config_migrates_to_ghost(self) -> None:
+    def test_old_config_migrates_to_current_default(self) -> None:
         config = Config.from_dict({"name": "Mochi", "scale": 1.0, "fps": 30})
-        self.assertEqual(config.species, "ghost")
-        self.assertEqual(config.name, "Boo-ombastic")
+        self.assertEqual(config.species, "robot")
+        self.assertEqual(config.name, "Bolt")
 
     def test_explicit_species_is_kept(self) -> None:
         config = Config.from_dict({"species": "mochi", "name": "Mochi"})
         self.assertEqual(config.species, "mochi")
         self.assertEqual(config.name, "Mochi")
 
+    def test_robot_species_is_kept(self) -> None:
+        config = Config.from_dict({"species": "robot", "name": "Bolt"})
+        self.assertEqual(config.species, "robot")
+
     def test_invalid_species_falls_back(self) -> None:
         config = Config.from_dict({"species": "dragon"})
-        self.assertEqual(config.species, "ghost")
+        self.assertEqual(config.species, "robot")
 
     def test_perch_defaults(self) -> None:
         config = Config()

@@ -22,6 +22,16 @@ STATE_DIR = _xdg_path("XDG_STATE_HOME", Path.home() / ".local" / "state") / APP_
 LOG_PATH = STATE_DIR / "desktop-buddy.log"
 
 THEMES: dict[str, dict[str, str]] = {
+    "circuit": {
+        "label": "Circuit White",
+        "body": "#f2f6f5",
+        "body_dark": "#c5cecd",
+        "belly": "#ffffff",
+        "accent": "#9eacab",
+        "outline": "#293136",
+        "blush": "#9ce6ea",
+        "eye": "#111719",
+    },
     "mint": {
         "label": "Mochi Mint",
         "body": "#7ed6b5",
@@ -84,14 +94,15 @@ THEMES: dict[str, dict[str, str]] = {
     },
 }
 
-DEFAULT_THEME = "mint"
+DEFAULT_THEME = "circuit"
 
 # Character roster. Keys are stored in the config; labels are user-facing.
 SPECIES: dict[str, dict[str, str]] = {
+    "robot": {"label": "Bolt the Robot", "default_name": "Bolt"},
     "ghost": {"label": "Boo-ombastic", "default_name": "Boo-ombastic"},
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
-DEFAULT_SPECIES = "ghost"
+DEFAULT_SPECIES = "robot"
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -191,7 +202,7 @@ class Config:
 
     # --------------------------------------------------------------- helpers
     def normalize(self) -> None:
-        self.name = str(self.name).strip()[:24] or "Mochi"
+        self.name = str(self.name).strip()[:24] or SPECIES[DEFAULT_SPECIES]["default_name"]
         if self.species not in SPECIES:
             self.species = DEFAULT_SPECIES
         if self.theme not in THEMES:

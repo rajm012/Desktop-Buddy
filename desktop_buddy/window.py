@@ -120,10 +120,11 @@ class BuddyWindow(QWidget):
     @staticmethod
     def _configure_brain_for_species(brain: Brain, species: str) -> None:
         ghost = species == "ghost"
-        brain.can_dance = ghost
+        brain.can_dance = species in ("ghost", "robot")
         brain.gravity_scale = 0.32 if ghost else 1.0
         brain.max_fall_speed = 150.0 if ghost else 1500.0
         brain.jump_scale = 0.85 if ghost else 1.0
+        brain.body_height = 132.0 if species == "robot" else 96.0
 
     def _make_brain(self, config: Config, screen: QScreen | None) -> Brain:
         if screen is None:
@@ -252,7 +253,7 @@ class BuddyWindow(QWidget):
         if self._species != config.species:
             self._character = make_character(config.species, self._palette)
             self._species = config.species
-        if config.species != "ghost" and self._brain.state is State.DANCE:
+        if config.species not in ("ghost", "robot") and self._brain.state is State.DANCE:
             self._brain._to_idle()  # noqa: SLF001 - same package helper
         self._palette = Palette.from_colors(config.theme_colors())
         self._character.set_palette(self._palette)
