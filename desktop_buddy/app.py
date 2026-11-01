@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes.util
 import json
 import logging
 import os
@@ -14,7 +13,6 @@ import time
 from contextlib import suppress
 from dataclasses import fields
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
@@ -24,20 +22,11 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_SLUG, __version__
 from .character import Palette
-from .config import CONFIG_PATH, LOG_PATH, SPECIES, STATE_DIR, Config
-from .platform_utils import (
-    autostart_enabled,
-    autostart_file,
-    battery_label,
-    icon_path,
-    on_battery,
-    server_name,
-    session_type,
-    set_autostart,
-    which_launcher,
-)
+from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
+from .platforms import get_backend
+from .platforms.base import Capability, PlatformBackend
 from .prefs import PreferencesDialog
-from .sound import play_chime
+from .sound import chime_path
 from .toast import ReminderToast
 from .tray import BuddyTray
 from .wellness import Reminder, ReminderState, WellnessEngine
@@ -130,7 +119,7 @@ def send_command(command: str, timeout_ms: int = 900) -> bool:
     """Send a control command to a running instance. False when not running."""
     _ensure_core_app()
     socket = QLocalSocket()
-    socket.connectToServer(server_name())
+    socket.connectToServer(get_backend().server_name())
     if not socket.waitForConnected(timeout_ms):
         return False
     socket.write(command.encode("utf-8"))
@@ -146,7 +135,7 @@ def request_reply(command: str, timeout_ms: int = 1400) -> str | None:
     """Send a command to a running instance and read its reply."""
     _ensure_core_app()
     socket = QLocalSocket()
-    socket.connectToServer(server_name())
+    socket.connectToServer(get_backend().server_name())
     if not socket.waitForConnected(timeout_ms):
         return None
     socket.write((command + "\n").encode("utf-8"))
@@ -173,13 +162,18 @@ class Controller(QObject):
     """Glue between config, window, tray, preferences and IPC."""
 
     def __init__(
-        self, app: QApplication, config: Config, first_run: bool = False
+        self,
+        app: QApplication,
+        config: Config,
+        first_run: bool = False,
+        backend: PlatformBackend | None = None,
     ) -> None:
         super().__init__()
         self.app = app
+        self.backend = backend or get_backend()
         self.config = config
-        self.config.autostart = autostart_enabled()
-        self.window = BuddyWindow(config)
+        self.config.autostart = self.backend.autostart_enabled()
+        self.window = BuddyWindow(config, backend=self.backend)
         self.window.config_changed_callback = self._schedule_save
         self.tray = BuddyTray(self)
         self.window.context_menu_requested.connect(self._show_context_menu)
@@ -188,7 +182,8 @@ class Controller(QObject):
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self.save_config)
         self._rng = random.Random()
-        self._wellness_path = STATE_DIR / "reminders.json"
+        self._state_dir = self.backend.paths().state_dir
+        self._wellness_path = self._state_dir / "reminders.json"
         self._wellness = self._build_wellness()
         self._toast: ReminderToast | None = None
         self._toast_queue: list[tuple[Reminder, str]] = []
@@ -213,7 +208,7 @@ class Controller(QObject):
         self._save_timer.stop()
         self.config.position_x = self.window.current_x
         self.config.paused = self.window.is_paused
-        self.config.autostart = autostart_enabled()
+        self.config.autostart = self.backend.autostart_enabled()
         try:
             self.config.save()
         except OSError as exc:
@@ -246,12 +241,18 @@ class Controller(QObject):
         self.set_paused(not self.window.is_paused)
 
     def set_always_on_top(self, enabled: bool) -> None:
+        if enabled and not self.backend.supports(Capability.ALWAYS_ON_TOP):
+            self._show_unavailable(Capability.ALWAYS_ON_TOP)
+            return
         self.config.always_on_top = bool(enabled)
         self.window.apply_config()
         self.tray.refresh()
         self._schedule_save()
 
     def set_click_through(self, enabled: bool) -> None:
+        if enabled and not self.backend.supports(Capability.CLICK_THROUGH):
+            self._show_unavailable(Capability.CLICK_THROUGH)
+            return
         self.config.click_through = bool(enabled)
         self.window.apply_config()
         self.tray.refresh()
@@ -262,6 +263,9 @@ class Controller(QObject):
             self.tray.show_message("Desktop Buddy", message)
 
     def set_reduce_on_battery(self, enabled: bool) -> None:
+        if enabled and not self.backend.supports(Capability.BATTERY):
+            self._show_unavailable(Capability.BATTERY)
+            return
         self.config.reduce_on_battery = bool(enabled)
         self.window.apply_config()
         self.tray.refresh()
@@ -330,6 +334,9 @@ class Controller(QObject):
         self.window.dance()
 
     def set_perch_on_windows(self, enabled: bool) -> None:
+        if enabled and not self.backend.supports(Capability.ACTIVE_WINDOW):
+            self._show_unavailable(Capability.ACTIVE_WINDOW)
+            return
         self.config.perch_on_windows = bool(enabled)
         self.window.apply_config()
         self.tray.refresh()
@@ -382,8 +389,8 @@ class Controller(QObject):
             "winddown": "Wind down 🌙",
         }.get(reminder.kind, f"{reminder.title}!")
         self.window.remind(reminder.kind, short)
-        if self.config.reminder_sound:
-            play_chime(reminder.kind, STATE_DIR)
+        if self.config.reminder_sound and self.backend.supports(Capability.AUDIO):
+            self.backend.play_audio(chime_path(reminder.kind, self._state_dir))
         self._queue_toast(reminder, message)
         if manual:
             log.info("Manual reminder: %s", reminder.id)
@@ -470,6 +477,9 @@ class Controller(QObject):
             self.window.say("I'll remind you to eat and drink! 🍎💧", 4.0)
 
     def set_reminder_sound(self, enabled: bool) -> None:
+        if enabled and not self.backend.supports(Capability.AUDIO):
+            self._show_unavailable(Capability.AUDIO)
+            return
         self.config.reminder_sound = bool(enabled)
         self.tray.refresh()
         self._schedule_save()
@@ -505,8 +515,11 @@ class Controller(QObject):
 
     def set_autostart(self, enabled: bool) -> None:
         enabled = bool(enabled)
+        if enabled and not self.backend.supports(Capability.AUTOSTART):
+            self._show_unavailable(Capability.AUTOSTART)
+            return
         try:
-            set_autostart(enabled)
+            self.backend.set_autostart(enabled)
         except OSError as exc:
             log.warning("Could not update autostart: %s", exc)
             self.tray.show_message(
@@ -522,7 +535,13 @@ class Controller(QObject):
             self.window.say("Okay, I'll stay put.", 3.5)
 
     def autostart_active(self) -> bool:
-        return autostart_enabled()
+        return self.backend.autostart_enabled()
+
+    def _show_unavailable(self, capability: Capability) -> None:
+        info = self.backend.capability(capability)
+        message = info.reason or f"{capability.value} is unavailable."
+        log.info("Unavailable capability %s: %s", capability.value, message)
+        self.tray.show_message("Desktop Buddy", message)
 
     # ----------------------------------------------------------------- window
     def show_buddy(self, *_args: object) -> None:
@@ -573,7 +592,7 @@ class Controller(QObject):
                 "&bull; Tray icon → Preferences for themes and behaviour</p>"
                 f"<p style='color:gray'>Python {sys.version.split()[0]} &middot; "
                 f"Qt {QT_VERSION_STR} &middot; PyQt {PYQT_VERSION_STR} &middot; "
-                f"session: {session_type()}</p>"
+                f"session: {self.backend.session_type()}</p>"
             ),
         )
 
@@ -586,7 +605,7 @@ class Controller(QObject):
 
     # -------------------------------------------------------------------- ipc
     def _start_ipc(self) -> LocalCommandServer:
-        return LocalCommandServer(server_name(), self.handle_command, self)
+        return LocalCommandServer(self.backend.server_name(), self.handle_command, self)
 
     def handle_command(self, command: str) -> str | None:
         if not command:
@@ -669,16 +688,6 @@ class Controller(QObject):
         )
 
 
-def _libxcb_cursor_available() -> bool:
-    if ctypes.util.find_library("xcb-cursor"):
-        return True
-    for entry in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
-        if entry and any(Path(entry).glob("libxcb-cursor.so.0*")):
-            return True
-    vendor = Path(__file__).resolve().parent.parent / "vendor" / "syslibs"
-    return any(vendor.glob("libxcb-cursor.so.0*"))
-
-
 def diagnose() -> int:
     """Print a support-friendly environment report."""
 
@@ -686,6 +695,7 @@ def diagnose() -> int:
         print(f"  {label:<16}: {value}", flush=True)
 
     print("Desktop Buddy diagnostics", flush=True)
+    backend = get_backend()
     line("version", __version__)
     line("python", f"{sys.version.split()[0]} ({sys.executable})")
     try:
@@ -694,30 +704,11 @@ def diagnose() -> int:
         line("PyQt / Qt", f"{PYQT_VERSION_STR} / {QT_VERSION_STR}")
     except Exception as exc:  # noqa: BLE001
         line("PyQt / Qt", f"unavailable ({exc})")
-    line("session", f"{session_type()} (compositor restrictions may apply on wayland)")
-    line("DISPLAY", os.environ.get("DISPLAY", "-"))
-    line("WAYLAND_DISPLAY", os.environ.get("WAYLAND_DISPLAY", "-"))
-    line("libxcb-cursor", "available" if _libxcb_cursor_available() else "MISSING")
-    line("battery", f"{battery_label()} | on battery: {on_battery()}")
-    try:
-        from .window_probe import X11WindowProbe, classify
-
-        probe = X11WindowProbe()
-        info = probe.active_window()
-        if info is not None:
-            line(
-                "active window",
-                f"{info.class_name or '?'} {info.width}x{info.height} "
-                f"at ({info.x},{info.y}) kind={classify(info.class_name)}",
-            )
-        else:
-            line("active window", "unavailable")
-        probe.close()
-    except Exception as exc:  # noqa: BLE001
-        line("active window", f"error: {exc}")
-    line("launcher", which_launcher())
-    line("autostart", "enabled" if autostart_enabled() else "disabled")
-    line("autostart file", autostart_file() if autostart_enabled() else "-")
+    for label, value in backend.diagnostics().items():
+        line(label, value)
+    for capability, info in backend.capabilities().items():
+        value = "available" if info.available else f"unavailable ({info.reason})"
+        line(f"cap:{capability.value}", value)
     line("config", CONFIG_PATH)
     line("log", LOG_PATH)
     try:
@@ -733,7 +724,7 @@ def diagnose() -> int:
             f"{screen.name()} {geometry.width()}x{geometry.height()} "
             f"@ {screen.devicePixelRatio()}x",
         )
-    if session_type() == "wayland":
+    if backend.session_type() == "wayland":
         print(
             "  note            : Wayland blocks self-positioning/always-on-top; "
             "log in with 'Ubuntu on Xorg' for full behaviour.",
@@ -791,6 +782,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    backend = get_backend()
 
     if args.diagnose:
         return diagnose()
@@ -832,11 +824,22 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "autostart":
             if args.value == "status":
-                print("enabled" if autostart_enabled() else "disabled")
+                if not backend.supports(Capability.AUTOSTART):
+                    print(
+                        f"unavailable: {backend.capability(Capability.AUTOSTART).reason}"
+                    )
+                    return 1
+                print("enabled" if backend.autostart_enabled() else "disabled")
                 return 0
             enabled = args.value == "on"
+            if enabled and not backend.supports(Capability.AUTOSTART):
+                print(backend.capability(Capability.AUTOSTART).reason, file=sys.stderr)
+                return 1
+            if send_command(f"autostart {args.value}"):
+                print(f"Autostart {'enabled' if enabled else 'disabled'}")
+                return 0
             try:
-                set_autostart(enabled)
+                backend.set_autostart(enabled)
             except OSError as exc:
                 print(f"Could not update autostart: {exc}", file=sys.stderr)
                 return 1
@@ -844,6 +847,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "click-through":
             enabled = args.value == "on"
+            if enabled and not backend.supports(Capability.CLICK_THROUGH):
+                print(
+                    backend.capability(Capability.CLICK_THROUGH).reason,
+                    file=sys.stderr,
+                )
+                return 1
+            if send_command(f"click-through {args.value}"):
+                print(f"Click-through {'enabled' if enabled else 'disabled'}")
+                return 0
             config = Config.load()
             config.click_through = enabled
             config.save()
@@ -871,8 +883,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationDisplayName("Desktop Buddy")
     app.setOrganizationName("DesktopBuddy")
     app.setDesktopFileName(APP_SLUG)
-    if icon_path().is_file():
-        icon = QIcon(str(icon_path()))
+    icon_path = backend.icon_path()
+    if icon_path.is_file():
+        icon = QIcon(str(icon_path))
         if not icon.isNull():
             app.setWindowIcon(icon)
     app.setQuitOnLastWindowClosed(False)
@@ -890,7 +903,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Config.load()
-    controller = Controller(app, config, first_run=not CONFIG_PATH.exists())
+    controller = Controller(
+        app, config, first_run=not CONFIG_PATH.exists(), backend=backend
+    )
 
     def _quit(*_args: object) -> None:
         controller.quit()

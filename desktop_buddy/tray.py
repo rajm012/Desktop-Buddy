@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .character import Palette, icon_pixmap
 from .config import SPECIES, THEMES
+from .platforms.base import Capability
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +146,21 @@ class BuddyTray(QObject):
         menu.addAction("About", controller.show_about)
         menu.addSeparator()
         menu.addAction("Quit", controller.quit)
+        self._apply_capabilities()
+
+    def _apply_capabilities(self) -> None:
+        controls = (
+            (self.act_top, Capability.ALWAYS_ON_TOP),
+            (self.act_click, Capability.CLICK_THROUGH),
+            (self.act_battery, Capability.BATTERY),
+            (self.act_perch, Capability.ACTIVE_WINDOW),
+            (self.act_chime, Capability.AUDIO),
+            (self.act_autostart, Capability.AUTOSTART),
+        )
+        for action, capability in controls:
+            info = self.controller.backend.capability(capability)
+            action.setEnabled(info.available)
+            action.setToolTip(info.reason)
 
     # ----------------------------------------------------------------- refresh
     def refresh(self) -> None:

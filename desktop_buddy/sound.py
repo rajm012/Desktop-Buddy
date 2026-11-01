@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-import shutil
 import struct
-import subprocess
 import wave
 from pathlib import Path
 
@@ -22,8 +20,6 @@ _NOTES: dict[str, tuple[tuple[float, float, float], ...]] = {
     "winddown": ((440.0, 0.2, 0.4), (349.2, 0.34, 0.35)),
     "default": ((784.0, 0.12, 0.5), (880.0, 0.22, 0.45)),
 }
-
-_PLAYERS = ("paplay", "pw-play", "aplay")
 
 
 def _write_chime(path: Path, notes: tuple[tuple[float, float, float], ...]) -> None:
@@ -57,25 +53,3 @@ def chime_path(kind: str, base_dir: Path) -> Path:
         except OSError as exc:  # pragma: no cover - filesystem issues
             log.warning("Could not write chime: %s", exc)
     return path
-
-
-def play_chime(kind: str, base_dir: Path) -> bool:
-    """Play a short chime. Returns True when a player was launched."""
-    path = chime_path(kind, base_dir)
-    if not path.is_file():
-        return False
-    for player in _PLAYERS:
-        executable = shutil.which(player)
-        if not executable:
-            continue
-        try:
-            subprocess.Popen(
-                [executable, str(path)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            return True
-        except OSError:
-            continue
-    return False

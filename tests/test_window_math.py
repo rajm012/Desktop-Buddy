@@ -9,23 +9,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from desktop_buddy import window as window_module  # noqa: E402
 from desktop_buddy.behavior import Perch  # noqa: E402
 from desktop_buddy.character import CANVAS_W, FOOT_PAD_UNITS  # noqa: E402
 from desktop_buddy.config import Config  # noqa: E402
+from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.window import BuddyWindow  # noqa: E402
-
-
-class _StubProbe:
-    """Keeps the real X11 probe out of unit tests."""
-
-    available = False
-
-    def active_window(self):  # noqa: ANN201
-        return None
-
-    def close(self) -> None:
-        return None
 
 
 class WindowMathTests(unittest.TestCase):
@@ -34,16 +22,13 @@ class WindowMathTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
-        self._real_probe = window_module.X11WindowProbe
-        window_module.X11WindowProbe = _StubProbe
         config = Config()
         config.species = "ghost"
         config.perch_on_windows = False
-        self.window = BuddyWindow(config)
+        self.window = BuddyWindow(config, backend=GenericPlatformBackend())
 
     def tearDown(self) -> None:
         self.window.close()
-        window_module.X11WindowProbe = self._real_probe
 
     def _pad_px(self) -> float:
         return FOOT_PAD_UNITS * (self.window.width() / CANVAS_W)

@@ -19,7 +19,7 @@ dev = ["build>=1.2,<2", "ruff>=0.8,<1"]
 desktop-buddy = "desktop_buddy.app:main"
 
 [tool.setuptools]
-packages = ["desktop_buddy"]
+packages = ["desktop_buddy", "desktop_buddy.platforms"]
 include-package-data = false
 
 [tool.setuptools.package-data]

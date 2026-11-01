@@ -42,7 +42,7 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Adaptive frame rate and a battery saver (lower fps on battery)
 - Remembers its position and settings between sessions
 - Single instance: launching again just shows the existing buddy
-- XDG autostart entry so it comes back when you log in
+- Platform-backed autostart entry so it comes back when you log in
 - All artwork drawn procedurally with `QPainter` — crisp at any scale (including
   your 2.5× fractional HiDPI setup), no bitmap assets to ship
 
@@ -201,8 +201,8 @@ tail -f ~/.local/state/desktop-buddy/desktop-buddy.log
   (default 09:00–22:30); meals fire at their fixed times.
 - If the laptop was asleep at a meal time, Boo still reminds you within the
   grace window (45 min by default) when you come back.
-- No chime? Boo uses `paplay`, `pw-play` or `aplay`; install one of them if
-  your system has none (all three are normally present on Ubuntu).
+- No chime? Check that the system has an available audio output. Reminder audio
+  now uses Qt Multimedia and does not require an external player command.
 
 ## Uninstall
 
@@ -223,14 +223,16 @@ desktop_buddy/
   behavior.py       pure-python physics + state machine (unit-tested)
   character.py      procedural QPainter characters (Bolt + Boo + Mochi)
   effects.py        dust, sparkles, hearts, Zzz, music notes, wisps
-  window_probe.py   X11 active-window probe (browser/terminal detection)
+  platforms/        capability interface and Linux/X11 implementation
+    base.py          backend contract, portable paths/audio/IPC identity
+    linux.py         X11 probing, workspace behavior, battery and autostart
   wellness.py       meal/water/break schedule + snooze logic (pure, unit-tested)
   toast.py          reminder card with Done/Snooze next to the buddy
-  sound.py          generated chimes, played via paplay/pw-play/aplay
+  sound.py          generated chime waveforms (played through the backend)
   prefs.py          preferences dialog + live preview
   tray.py           tray icon and shared context menu
   config.py         JSON settings, themes, validation
-  platform_utils.py battery, autostart, paths
+  platform_utils.py compatibility wrappers for backend calls
 install.sh / uninstall.sh / run.sh
 scripts/fetch_qt_syslibs.sh
 tests/              unittest suite (no display required)

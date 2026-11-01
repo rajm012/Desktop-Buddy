@@ -36,7 +36,7 @@ QT_QPA_PLATFORM=offscreen python tools/preview.py \
 - Perching is heuristic and limited to recognizable X11 browser and terminal
   windows; unusual window managers or application class names may not match.
 - Click-through and workspace stickiness depend on best-effort X11 calls.
-- Audio currently depends on an installed `paplay`, `pw-play` or `aplay` command.
+- Reminder audio depends on Qt Multimedia and an available system audio output.
 - The tray icon depends on the desktop's StatusNotifier/AppIndicator support.
 - Active-window inspection and some diagnostics are Linux/X11-specific.
 - Configuration and state are local to the current user and are not synchronized.

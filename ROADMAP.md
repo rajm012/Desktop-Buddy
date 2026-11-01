@@ -67,7 +67,7 @@ visible behaviour.
 
 ### Steps
 
-1. Define a `PlatformBackend` interface with capabilities for:
+- [x] Define a `PlatformBackend` interface with capabilities for:
    - configuration and state paths;
    - autostart;
    - battery status;
@@ -76,21 +76,21 @@ visible behaviour.
    - click-through support;
    - audio playback;
    - session diagnostics.
-2. Move the current X11 implementation into `platforms/linux.py`.
-3. Replace direct X11 construction in the window and controller with backend calls.
-4. Replace XDG-only paths with Qt `QStandardPaths` or backend-provided paths.
-5. Replace `os.getuid()` in the IPC server name with a cross-platform user/session ID.
-6. Replace `paplay`, `pw-play` and `aplay` with a Qt audio implementation.
-7. Add a capability model so unsupported features are disabled in the UI instead
+- [x] Move the current X11 implementation into `platforms/linux.py`.
+- [x] Replace direct X11 construction in the window and controller with backend calls.
+- [x] Replace XDG-only paths with Qt `QStandardPaths` or backend-provided paths.
+- [x] Replace `os.getuid()` in the IPC server name with a cross-platform user/session ID.
+- [x] Replace `paplay`, `pw-play` and `aplay` with a Qt audio implementation.
+- [x] Add a capability model so unsupported features are disabled in the UI instead
    of silently failing.
-8. Keep X11 behaviour and tests unchanged after the refactor.
+- [x] Keep X11 behaviour and tests unchanged after the refactor.
 
 ### Acceptance criteria
 
-- Linux/X11 retains perching, click-through, autostart and audio.
-- Core modules do not import `ctypes`, X11 libraries or Linux paths.
-- The preferences dialog explains when a platform capability is unavailable.
-- Existing tests pass and platform backends have isolated unit tests.
+- [x] Linux/X11 retains perching, click-through, autostart and audio.
+- [x] Core modules do not import `ctypes`, X11 libraries or Linux paths.
+- [x] The preferences dialog explains when a platform capability is unavailable.
+- [x] Existing tests pass and platform backends have isolated unit tests.
 
 ---
 

@@ -8,18 +8,13 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from . import APP_SLUG
+from .platforms import get_backend
 
-
-def _xdg_path(env_var: str, default: Path) -> Path:
-    value = os.environ.get(env_var)
-    return Path(value) if value else default
-
-
-CONFIG_DIR = _xdg_path("XDG_CONFIG_HOME", Path.home() / ".config") / APP_SLUG
-CONFIG_PATH = CONFIG_DIR / "config.json"
-STATE_DIR = _xdg_path("XDG_STATE_HOME", Path.home() / ".local" / "state") / APP_SLUG
-LOG_PATH = STATE_DIR / "desktop-buddy.log"
+_PLATFORM_PATHS = get_backend().paths()
+CONFIG_DIR = _PLATFORM_PATHS.config_dir
+CONFIG_PATH = _PLATFORM_PATHS.config_file
+STATE_DIR = _PLATFORM_PATHS.state_dir
+LOG_PATH = _PLATFORM_PATHS.log_file
 
 THEMES: dict[str, dict[str, str]] = {
     "circuit": {

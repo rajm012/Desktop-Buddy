@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from .behavior import Brain, State, World
 from .character import Palette, make_character
 from .config import SPECIES, THEMES
+from .platforms.base import Capability
 
 
 class CharacterPreview(QWidget):
@@ -207,6 +208,15 @@ class PreferencesDialog(QDialog):
         reminders_grid.addWidget(break_row, row + 1, 1, 1, 2)
         layout.addWidget(reminders_group)
 
+        self.capability_notice = QLabel()
+        self.capability_notice.setWordWrap(True)
+        self.capability_notice.setStyleSheet(
+            "background: #fff4d6; color: #5f4b16; border: 1px solid #e4cb7a; "
+            "border-radius: 6px; padding: 7px;"
+        )
+        self._apply_capabilities()
+        layout.addWidget(self.capability_notice)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -268,6 +278,37 @@ class PreferencesDialog(QDialog):
         self.water_slider.setValue(int(config.water_interval_minutes))
         self.break_slider.setValue(int(config.break_interval_minutes))
         self.preview.refresh()
+
+    def _apply_capabilities(self) -> None:
+        controls = (
+            (self.check_top, Capability.ALWAYS_ON_TOP, "Always on top"),
+            (self.check_click, Capability.CLICK_THROUGH, "Click-through"),
+            (self.check_battery, Capability.BATTERY, "Battery detection"),
+            (self.check_perch, Capability.ACTIVE_WINDOW, "Window perching"),
+            (self.check_chime, Capability.AUDIO, "Reminder audio"),
+        )
+        unavailable: list[str] = []
+        for widget, capability, label in controls:
+            info = self.controller.backend.capability(capability)
+            widget.setEnabled(info.available)
+            widget.setToolTip(info.reason)
+            if not info.available:
+                unavailable.append(f"{label}: {info.reason}")
+        extras = (
+            (Capability.AUTOSTART, "Login autostart"),
+            (Capability.WORKSPACE_BEHAVIOR, "All-workspace visibility"),
+        )
+        for capability, label in extras:
+            info = self.controller.backend.capability(capability)
+            if not info.available:
+                unavailable.append(f"{label}: {info.reason}")
+        if unavailable:
+            self.capability_notice.setText(
+                "Some system features are unavailable:\n" + "\n".join(unavailable)
+            )
+            self.capability_notice.show()
+        else:
+            self.capability_notice.hide()
 
     # ------------------------------------------------------------------- events
     def _on_name(self, text: str) -> None:

@@ -30,8 +30,8 @@ from .character import (
 )
 from .config import Config
 from .effects import ParticleSystem
-from .platform_utils import on_battery, set_window_sticky
-from .window_probe import X11WindowProbe, classify
+from .platforms import get_backend
+from .platforms.base import Capability, PlatformBackend
 
 log = logging.getLogger(__name__)
 
@@ -44,8 +44,14 @@ class BuddyWindow(QWidget):
 
     context_menu_requested = pyqtSignal(QPoint)
 
-    def __init__(self, config: Config, parent: QWidget | None = None) -> None:
-        flags = self._compute_flags(config)
+    def __init__(
+        self,
+        config: Config,
+        parent: QWidget | None = None,
+        backend: PlatformBackend | None = None,
+    ) -> None:
+        self.backend = backend or get_backend()
+        flags = self._compute_flags(config, self.backend)
         super().__init__(parent, flags)
         self.config = config
         self._flags = flags
@@ -55,7 +61,8 @@ class BuddyWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, config.click_through
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            self._click_through_active(),
         )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setWindowTitle(config.name)
@@ -67,7 +74,7 @@ class BuddyWindow(QWidget):
         self._grab_dx = 0.0
         self._grab_dy = 0.0
         self._last_move: tuple[int, int] | None = None
-        self._on_battery = on_battery()
+        self._on_battery = self.backend.battery_status().on_battery
         self._battery_countdown = 10.0
         self._zzz_timer = 0.6
         self._note_timer = 0.2
@@ -97,7 +104,7 @@ class BuddyWindow(QWidget):
         self._connect_screen_signals()
         self._make_sticky()
 
-        self._probe = X11WindowProbe()
+        self._probe = self.backend.create_active_window_probe()
         self._perch_timer = QTimer(self)
         self._perch_timer.setInterval(700)
         self._perch_timer.timeout.connect(self._poll_perch)
@@ -105,17 +112,22 @@ class BuddyWindow(QWidget):
 
     # ------------------------------------------------------------------ setup
     @staticmethod
-    def _compute_flags(config: Config) -> Qt.WindowType:
+    def _compute_flags(config: Config, backend: PlatformBackend) -> Qt.WindowType:
         flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
             | Qt.WindowType.WindowDoesNotAcceptFocus
         )
-        if config.always_on_top:
+        if config.always_on_top and backend.supports(Capability.ALWAYS_ON_TOP):
             flags |= Qt.WindowType.WindowStaysOnTopHint
-        if config.click_through:
+        if config.click_through and backend.supports(Capability.CLICK_THROUGH):
             flags |= Qt.WindowType.WindowTransparentForInput
         return flags
+
+    def _click_through_active(self) -> bool:
+        return self.config.click_through and self.backend.supports(
+            Capability.CLICK_THROUGH
+        )
 
     @staticmethod
     def _configure_brain_for_species(brain: Brain, species: str) -> None:
@@ -281,9 +293,10 @@ class BuddyWindow(QWidget):
         self._brain.tuning.edge_margin = max(46.0, width / 2.0 + 2.0)
 
     def _apply_flags(self) -> None:
-        flags = self._compute_flags(self.config)
+        flags = self._compute_flags(self.config, self.backend)
         self.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, self.config.click_through
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            self._click_through_active(),
         )
         if flags == self._flags:
             return
@@ -295,11 +308,11 @@ class BuddyWindow(QWidget):
             self._make_sticky()
 
     def _make_sticky(self) -> None:
-        """Keep the buddy visible on every workspace (X11 best effort)."""
-        if QGuiApplication.platformName() != "xcb":
+        """Keep the buddy visible on every workspace when supported."""
+        if not self.backend.supports(Capability.WORKSPACE_BEHAVIOR):
             return
         try:
-            set_window_sticky(int(self.winId()))
+            self.backend.apply_workspace_behavior(int(self.winId()))
         except Exception:  # noqa: BLE001
             log.debug("Could not set sticky window state", exc_info=True)
 
@@ -357,7 +370,7 @@ class BuddyWindow(QWidget):
         self._battery_countdown -= dt
         if self._battery_countdown <= 0.0:
             self._battery_countdown = 15.0
-            value = on_battery()
+            value = self.backend.battery_status().on_battery
             if value != self._on_battery:
                 self._on_battery = value
                 self._update_timer()
@@ -428,7 +441,8 @@ class BuddyWindow(QWidget):
         config = self.config
         if (
             not config.perch_on_windows
-            or config.click_through
+            or self._click_through_active()
+            or not self.backend.supports(Capability.ACTIVE_WINDOW)
             or not self._probe.available
             or time.monotonic() < self._perch_cooldown_until
         ):
@@ -445,7 +459,7 @@ class BuddyWindow(QWidget):
         if info.window_id == own_id:
             self._drop_perch()
             return
-        kind = classify(info.class_name)
+        kind = self.backend.classify_window(info.class_name)
         if kind is None:
             self._release_perch_after_delay()
             return
@@ -542,7 +556,7 @@ class BuddyWindow(QWidget):
             return
         if (
             event.button() == Qt.MouseButton.LeftButton
-            and not self.config.click_through
+            and not self._click_through_active()
         ):
             self._dragging = True
             self._brain.start_drag()
@@ -582,7 +596,7 @@ class BuddyWindow(QWidget):
             event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: ANN001
-        if event.button() != Qt.MouseButton.LeftButton or self.config.click_through:
+        if event.button() != Qt.MouseButton.LeftButton or self._click_through_active():
             return
         if self._brain.state is State.DRAG:
             self._dragging = False
@@ -604,7 +618,7 @@ class BuddyWindow(QWidget):
         event.accept()
 
     def enterEvent(self, event) -> None:  # noqa: ANN001
-        if not self.config.click_through:
+        if not self._click_through_active():
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().enterEvent(event)
 
@@ -612,6 +626,10 @@ class BuddyWindow(QWidget):
         if not self._dragging:
             self.unsetCursor()
         super().leaveEvent(event)
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        self._probe.close()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------ paint
     def paintEvent(self, event) -> None:  # noqa: ANN001
