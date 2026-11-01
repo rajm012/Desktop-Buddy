@@ -48,9 +48,7 @@ class BuddyTray(QObject):
             self.icon.setContextMenu(self.menu)
             self.icon.activated.connect(self._on_activated)
         else:
-            log.info(
-                "System tray is unavailable; right-click the buddy for the menu."
-            )
+            log.info("System tray is unavailable; right-click the buddy for the menu.")
         self.refresh()
 
     # ------------------------------------------------------------------- build
@@ -96,12 +94,8 @@ class BuddyTray(QObject):
         )
         self.act_chime.setCheckable(True)
         reminders_menu.addSeparator()
-        reminders_menu.addAction(
-            "Water now", lambda: controller.remind_now("water")
-        )
-        reminders_menu.addAction(
-            "Stretch now", lambda: controller.remind_now("break")
-        )
+        reminders_menu.addAction("Water now", lambda: controller.remind_now("water"))
+        reminders_menu.addAction("Stretch now", lambda: controller.remind_now("break"))
         reminders_menu.addAction("Upcoming…", controller.show_reminders)
 
         speed_menu = menu.addMenu("Speed")
@@ -181,7 +175,9 @@ class BuddyTray(QObject):
 
     def show_message(self, title: str, message: str) -> None:
         if self.icon is not None and self.icon.isVisible():
-            self.icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 4000)
+            self.icon.showMessage(
+                title, message, QSystemTrayIcon.MessageIcon.Information, 4000
+            )
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

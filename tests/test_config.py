@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from desktop_buddy.config import THEMES, Config
+from desktop_buddy.config import CURRENT_CONFIG_SCHEMA_VERSION, THEMES, Config
 from desktop_buddy.platform_utils import autostart_enabled, set_autostart
 
 
@@ -30,6 +30,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.scale, 1.2)
             self.assertEqual(loaded.theme, "peach")
             self.assertEqual(loaded.name, "Biscuit")
+            self.assertEqual(loaded.schema_version, CURRENT_CONFIG_SCHEMA_VERSION)
 
     def test_invalid_values_are_normalized(self) -> None:
         config = Config.from_dict(
@@ -57,10 +58,23 @@ class ConfigTests(unittest.TestCase):
             for color_key in ("body", "belly", "accent", "outline", "eye"):
                 self.assertIn(color_key, colors)
 
-    def test_old_config_migrates_to_current_default(self) -> None:
-        config = Config.from_dict({"name": "Mochi", "scale": 1.0, "fps": 30})
+    def test_version_zero_config_migrates_to_original_renderer(self) -> None:
+        config = Config.from_dict({"name": "Biscuit", "scale": 1.0, "fps": 30})
+        self.assertEqual(config.schema_version, CURRENT_CONFIG_SCHEMA_VERSION)
+        self.assertEqual(config.species, "mochi")
+        self.assertEqual(config.name, "Biscuit")
+
+    def test_migration_does_not_depend_on_character_name(self) -> None:
+        for name in ("Mochi", "Bolt", "Mi amigo", "ねこ"):
+            with self.subTest(name=name):
+                config = Config.from_dict({"name": name})
+                self.assertEqual(config.species, "mochi")
+                self.assertEqual(config.name, name)
+
+    def test_current_unversioned_config_keeps_explicit_species(self) -> None:
+        config = Config.from_dict({"species": "robot", "name": "Custom"})
         self.assertEqual(config.species, "robot")
-        self.assertEqual(config.name, "Bolt")
+        self.assertEqual(config.name, "Custom")
 
     def test_explicit_species_is_kept(self) -> None:
         config = Config.from_dict({"species": "mochi", "name": "Mochi"})

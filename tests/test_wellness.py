@@ -7,10 +7,16 @@ import unittest
 from datetime import datetime
 
 from desktop_buddy.config import Config
-from desktop_buddy.wellness import ReminderState, WellnessEngine
+from desktop_buddy.wellness import (
+    CURRENT_WELLNESS_SCHEMA_VERSION,
+    ReminderState,
+    WellnessEngine,
+)
 
 
-def engine_at(moment: datetime, config: Config | None = None, state=None) -> WellnessEngine:
+def engine_at(
+    moment: datetime, config: Config | None = None, state=None
+) -> WellnessEngine:
     return WellnessEngine(
         config or Config(), state, random.Random(3), now_fn=lambda: moment
     )
@@ -44,8 +50,12 @@ class MealReminderTests(unittest.TestCase):
         lunch = engine.find("lunch")
         self.assertIsNotNone(lunch)
         engine.snooze(lunch, 10, datetime(2026, 10, 3, 13, 30))
-        self.assertNotIn("lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 35))])
-        self.assertIn("lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 41))])
+        self.assertNotIn(
+            "lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 35))]
+        )
+        self.assertIn(
+            "lunch", [r.id for r in engine.due(datetime(2026, 10, 3, 13, 41))]
+        )
 
     def test_disabled_meals_are_skipped(self) -> None:
         config = Config()
@@ -108,13 +118,26 @@ class UpcomingTests(unittest.TestCase):
         state.last_done["water"] = datetime(2026, 10, 3, 10, 0)
         state.snooze_until["lunch"] = datetime(2026, 10, 3, 13, 45)
         restored = ReminderState.from_dict(state.to_dict())
+        self.assertEqual(restored.schema_version, CURRENT_WELLNESS_SCHEMA_VERSION)
         self.assertEqual(restored.last_done["water"], state.last_done["water"])
         self.assertEqual(restored.snooze_until["lunch"], state.snooze_until["lunch"])
+
+    def test_legacy_state_gets_schema_version(self) -> None:
+        restored = ReminderState.from_dict(
+            {"last_done": {"water": "2026-10-03T10:00:00"}}
+        )
+        self.assertEqual(restored.schema_version, CURRENT_WELLNESS_SCHEMA_VERSION)
+        self.assertEqual(restored.last_done["water"], datetime(2026, 10, 3, 10, 0))
 
     def test_state_handles_garbage(self) -> None:
         restored = ReminderState.from_dict(
             {"last_done": {"water": "not a date"}, "snooze_until": {}}
         )
+        self.assertEqual(restored.last_done, {})
+
+    def test_state_handles_non_mapping_json(self) -> None:
+        restored = ReminderState.from_dict([])
+        self.assertEqual(restored.schema_version, CURRENT_WELLNESS_SCHEMA_VERSION)
         self.assertEqual(restored.last_done, {})
 
 

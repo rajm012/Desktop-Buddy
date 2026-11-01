@@ -1,5 +1,6 @@
-
 from __future__ import annotations
+
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from desktop_buddy.config import THEMES  # noqa: E402
 from desktop_buddy.effects import ParticleSystem  # noqa: E402
 
 CELL_W, CELL_H = 210, 310
+SCREENSHOT_POSES = ("idle", "walk", "run", "jump", "fall", "land", "dance", "sleep")
 
 
 def make_brain(state: State, **kwargs: object) -> Brain:
@@ -38,25 +40,34 @@ def poses() -> list[tuple[str, Brain, list[tuple[str, float, float]]]]:
         ("run", make_brain(State.RUN, anim_time=0.31, look=(0.8, -0.1)), []),
         ("jump", make_brain(State.AIR, vy=-260.0), [("sparkles", 0.0, -20.0)]),
         ("fall", make_brain(State.AIR, anim_time=0.35, vy=320.0), []),
-        ("land", make_brain(State.LAND, state_time=0.07, last_impact=650.0), [("dust", 0.0, -2.0)]),
-        ("dance", make_brain(State.DANCE, anim_time=0.62, can_dance=True), [("notes", 8.0, -80.0), ("hearts", 0.0, -64.0)]),
+        (
+            "land",
+            make_brain(State.LAND, state_time=0.07, last_impact=650.0),
+            [("dust", 0.0, -2.0)],
+        ),
+        (
+            "dance",
+            make_brain(State.DANCE, anim_time=0.62, can_dance=True),
+            [("notes", 8.0, -80.0), ("hearts", 0.0, -64.0)],
+        ),
         ("sleep", make_brain(State.SLEEP, anim_time=1.1), [("zzz", 24.0, -78.0)]),
         ("drag", make_brain(State.DRAG, look=(0.0, -0.8)), [("wisp", -18.0, -38.0)]),
     ]
 
 
-def main() -> int:
-    output = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/buddy-preview.png")
-    species = sys.argv[2] if len(sys.argv) > 2 else "robot"
+def render_sheet(
+    species: str,
+) -> tuple[QImage, list[tuple[str, Brain, list[tuple[str, float, float]]]]]:
     palette_colors = THEMES["mint"]
     if species == "ghost":
         palette_colors = THEMES["lavender"]
     elif species == "robot":
         palette_colors = THEMES["circuit"]
 
-    app = QGuiApplication([])  # noqa: F841
     sheet = poses()
-    image = QImage(CELL_W * len(sheet), CELL_H, QImage.Format.Format_ARGB32_Premultiplied)
+    image = QImage(
+        CELL_W * len(sheet), CELL_H, QImage.Format.Format_ARGB32_Premultiplied
+    )
     image.fill(QColor("#eef1f5"))
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -75,7 +86,9 @@ def main() -> int:
         painter.drawRoundedRect(QRectF(6, 6, CELL_W - 12, CELL_H - 12), 10, 10)
         painter.setPen(QColor("#222833"))
         painter.setFont(label_font)
-        painter.drawText(QRectF(12, 10, CELL_W - 24, 24), Qt.AlignmentFlag.AlignLeft, name)
+        painter.drawText(
+            QRectF(12, 10, CELL_W - 24, 24), Qt.AlignmentFlag.AlignLeft, name
+        )
 
         width = int(CANVAS_W * scale)
         height = int(CANVAS_H * scale)
@@ -91,16 +104,39 @@ def main() -> int:
             particles.emit(kind, px, py, palette)
         particles.update(0.25)
         painter.save()
-        painter.translate(
-            offset_x + width / 2.0, offset_y + height - 18.0 * scale
-        )
+        painter.translate(offset_x + width / 2.0, offset_y + height - 18.0 * scale)
         painter.scale(scale, scale)
         particles.paint(painter)
         painter.restore()
         painter.restore()
 
     painter.end()
+    return image, sheet
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Render Desktop Buddy pose previews")
+    parser.add_argument("output", nargs="?", default="/tmp/buddy-preview.png")
+    parser.add_argument("species", nargs="?", default="robot")
+    parser.add_argument(
+        "--individual-dir",
+        type=Path,
+        help="also save one labeled PNG per baseline pose",
+    )
+    args = parser.parse_args()
+
+    app = QGuiApplication([])  # noqa: F841
+    output = Path(args.output)
+    image, sheet = render_sheet(args.species)
+    output.parent.mkdir(parents=True, exist_ok=True)
     image.save(str(output))
+    if args.individual_dir is not None:
+        args.individual_dir.mkdir(parents=True, exist_ok=True)
+        for index, (name, _brain, _effects) in enumerate(sheet):
+            if name not in SCREENSHOT_POSES:
+                continue
+            screenshot = image.copy(index * CELL_W, 0, CELL_W, CELL_H)
+            screenshot.save(str(args.individual_dir / f"bolt-{name}.png"))
     print(output)
     return 0
 

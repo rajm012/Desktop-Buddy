@@ -15,6 +15,7 @@ from contextlib import suppress
 from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
 from PyQt6.QtGui import QGuiApplication, QIcon
@@ -56,6 +57,51 @@ CONTROL_COMMANDS = (
 )
 
 _CORE_APP: QCoreApplication | None = None
+
+
+class LocalCommandServer(QObject):
+    """Small newline-delimited local IPC server used by the primary instance."""
+
+    def __init__(
+        self,
+        name: str,
+        handler: Callable[[str], str | None],
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.name = name
+        self.handler = handler
+        QLocalServer.removeServer(name)
+        self.server = QLocalServer(self)
+        self.server.newConnection.connect(self._on_new_connection)
+        if not self.server.listen(name):
+            log.error("IPC server failed to start: %s", self.server.errorString())
+
+    @property
+    def listening(self) -> bool:
+        return self.server.isListening()
+
+    def close(self) -> None:
+        self.server.close()
+        QLocalServer.removeServer(self.name)
+
+    def _on_new_connection(self) -> None:
+        while self.server.hasPendingConnections():
+            socket = self.server.nextPendingConnection()
+            if socket is None:
+                return
+
+            def read(sock: QLocalSocket = socket) -> None:
+                data = bytes(sock.readAll()).decode("utf-8", "replace")
+                for line in data.splitlines():
+                    reply = self.handler(line.strip())
+                    if reply:
+                        sock.write((reply + "\n").encode("utf-8"))
+                        sock.flush()
+
+            socket.readyRead.connect(read)
+            socket.disconnected.connect(socket.deleteLater)
+            read(socket)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -126,7 +172,9 @@ def request_status(timeout_ms: int = 1400) -> str | None:
 class Controller(QObject):
     """Glue between config, window, tray, preferences and IPC."""
 
-    def __init__(self, app: QApplication, config: Config, first_run: bool = False) -> None:
+    def __init__(
+        self, app: QApplication, config: Config, first_run: bool = False
+    ) -> None:
         super().__init__()
         self.app = app
         self.config = config
@@ -302,9 +350,7 @@ class Controller(QObject):
         return WellnessEngine(self.config, state, self._rng)
 
     def _rebuild_wellness(self) -> None:
-        self._wellness = WellnessEngine(
-            self.config, self._wellness.state, self._rng
-        )
+        self._wellness = WellnessEngine(self.config, self._wellness.state, self._rng)
 
     def _save_wellness(self) -> None:
         try:
@@ -463,7 +509,9 @@ class Controller(QObject):
             set_autostart(enabled)
         except OSError as exc:
             log.warning("Could not update autostart: %s", exc)
-            self.tray.show_message("Desktop Buddy", f"Could not update autostart: {exc}")
+            self.tray.show_message(
+                "Desktop Buddy", f"Could not update autostart: {exc}"
+            )
             return
         self.config.autostart = enabled
         self.tray.refresh()
@@ -537,30 +585,8 @@ class Controller(QObject):
         self.app.quit()
 
     # -------------------------------------------------------------------- ipc
-    def _start_ipc(self) -> QLocalServer:
-        QLocalServer.removeServer(server_name())
-        server = QLocalServer(self)
-        if not server.listen(server_name()):
-            log.error("IPC server failed to start: %s", server.errorString())
-        server.newConnection.connect(self._on_new_connection)
-        return server
-
-    def _on_new_connection(self) -> None:
-        socket = self._server.nextPendingConnection()
-        if socket is None:
-            return
-
-        def read(sock: QLocalSocket = socket) -> None:
-            data = bytes(sock.readAll()).decode("utf-8", "replace")
-            for line in data.splitlines():
-                reply = self.handle_command(line.strip())
-                if reply:
-                    sock.write((reply + "\n").encode("utf-8"))
-                    sock.flush()
-
-        socket.readyRead.connect(read)
-        socket.disconnected.connect(socket.deleteLater)
-        read(socket)
+    def _start_ipc(self) -> LocalCommandServer:
+        return LocalCommandServer(server_name(), self.handle_command, self)
 
     def handle_command(self, command: str) -> str | None:
         if not command:
@@ -637,9 +663,7 @@ class Controller(QObject):
         )
 
     def _greet(self) -> None:
-        self.window.say(
-            f"Hi, I'm {self.config.name}! Drag me or right-click me.", 7.0
-        )
+        self.window.say(f"Hi, I'm {self.config.name}! Drag me or right-click me.", 7.0)
         self.tray.show_message(
             "Desktop Buddy", f"{self.config.name} has moved onto your desktop!"
         )

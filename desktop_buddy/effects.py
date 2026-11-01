@@ -60,7 +60,9 @@ class ParticleSystem:
     def _emit_dust(self, x: float, y: float, palette: Palette) -> None:
         for _ in range(self.rng.randint(6, 9)):
             side = self.rng.choice((-1, 1))
-            color = QColor(palette.belly if self.rng.random() < 0.5 else palette.body_dark)
+            color = QColor(
+                palette.belly if self.rng.random() < 0.5 else palette.body_dark
+            )
             self.items.append(
                 Particle(
                     kind="dust",
@@ -202,18 +204,18 @@ class ParticleSystem:
                 particle.vx *= max(0.0, 1.0 - dt * 2.6)
             elif particle.kind == "heart":
                 particle.vy += 12.0 * dt
-                particle.x += math.sin(
-                    particle.progress * 9.0 + particle.wobble
-                ) * 14.0 * dt
+                particle.x += (
+                    math.sin(particle.progress * 9.0 + particle.wobble) * 14.0 * dt
+                )
             elif particle.kind == "sparkle":
                 particle.vy += 150.0 * dt
                 particle.rotation += particle.spin * dt
             elif particle.kind == "zzz":
                 particle.x += math.sin(particle.progress * 6.0) * 6.0 * dt
             elif particle.kind == "note":
-                particle.x += math.sin(
-                    particle.progress * 7.0 + particle.wobble
-                ) * 12.0 * dt
+                particle.x += (
+                    math.sin(particle.progress * 7.0 + particle.wobble) * 12.0 * dt
+                )
                 particle.vy -= 6.0 * dt
             elif particle.kind == "wisp":
                 particle.vy += 8.0 * dt
@@ -256,7 +258,9 @@ class ParticleSystem:
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
         grow = 1.0 + particle.progress * 0.8
-        painter.drawEllipse(QPointF(0.0, 0.0), particle.size * grow, particle.size * grow)
+        painter.drawEllipse(
+            QPointF(0.0, 0.0), particle.size * grow, particle.size * grow
+        )
 
     def _paint_heart(self, painter: QPainter, particle: Particle, alpha: int) -> None:
         color = QColor(particle.color)
@@ -264,7 +268,9 @@ class ParticleSystem:
         size = particle.size
         path = QPainterPath()
         path.moveTo(0.0, size * 0.9)
-        path.cubicTo(-size * 1.5, -size * 0.2, -size * 0.7, -size * 1.5, 0.0, -size * 0.55)
+        path.cubicTo(
+            -size * 1.5, -size * 0.2, -size * 0.7, -size * 1.5, 0.0, -size * 0.55
+        )
         path.cubicTo(size * 0.7, -size * 1.5, size * 1.5, -size * 0.2, 0.0, size * 0.9)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
@@ -335,6 +341,4 @@ class ParticleSystem:
         painter.drawPath(path)
         highlight = QColor(255, 255, 255, min(200, alpha))
         painter.setBrush(highlight)
-        painter.drawEllipse(
-            QPointF(-size * 0.25, size * 0.15), size * 0.22, size * 0.3
-        )
+        painter.drawEllipse(QPointF(-size * 0.25, size * 0.15), size * 0.22, size * 0.3)

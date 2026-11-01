@@ -10,6 +10,8 @@ investigates your cursor, and **looks after you** with gentle wellness reminders
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 
+![Bolt's baseline animation poses](docs/screenshots/bolt-poses.png)
+
 ---
 
 ## Features
@@ -36,7 +38,7 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
 - Preferences dialog with a **live animated preview**
-- 6 colour themes, adjustable size / speed / frame rate / sleep timeout
+- 7 colour themes, adjustable size / speed / frame rate / sleep timeout
 - Adaptive frame rate and a battery saver (lower fps on battery)
 - Remembers its position and settings between sessions
 - Single instance: launching again just shows the existing buddy
@@ -110,9 +112,10 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `schema_version` | `1` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
-| `theme` | `"mint"` | `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
+| `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
 | `scale` | `0.8` | 0.5 – 1.8 |
 | `speed` | `1.0` | 0.4 – 2.5 |
 | `fps` | `30` | 10 – 60 (adaptive; idles at ≤ 15) |
@@ -136,13 +139,18 @@ but hand-editable too):
 
 ## Performance
 
-Measured on this machine (i5-13500H, 2.5× HiDPI, 165 Hz panel, X11, Qt 6.11):
+The Phase 0 baseline is recorded in [BENCHMARKS.md](BENCHMARKS.md). On the
+reference i5-13500H Linux/X11 system, startup to first paint is about 174 ms,
+idle use is about 4% of one core, and active movement is about 7% of one core.
 
-| State | CPU (one core) | Memory |
-| --- | --- | --- |
-| Active (walking/dancing/perched) | ~7 % | ~85 MB |
-| Idle / sleeping | ~4 % (adaptive fps) | ~85 MB |
-| Paused or hidden | ~1 % | ~85 MB |
+Summary:
+
+| State | CPU (one core) | Memory | Startup |
+| --- | --- | --- | --- |
+| First paint (offscreen check) | — | — | ~174 ms |
+| Active (walking/dancing/perched) | ~7 % | ~85 MB | — |
+| Idle / sleeping | ~4 % (adaptive fps) | ~85 MB | — |
+| Paused or hidden | ~1 % | ~85 MB | — |
 
 The window is only ~112 × 128 logical pixels, so even where it overlaps other
 windows it blocks almost nothing.
@@ -232,14 +240,17 @@ tools/preview.py    renders a pose/theme sheet to PNG
 ## Development
 
 ```bash
-.venv/bin/pip install .                 # reinstall after source changes
-PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/pip install -e '.[dev]'       # one-time development setup
+./scripts/check.sh                      # format check, tests, package build
 .venv/bin/python tools/preview.py /tmp/buddy-preview.png
 ./run.sh --diagnose
 ```
 
 The behaviour engine (`behavior.py`) has no Qt dependency, so the physics and
 state machine can be tested headlessly.
+
+The supported Phase 0 feature set and known constraints are maintained in
+[docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
 

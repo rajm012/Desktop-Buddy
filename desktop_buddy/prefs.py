@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QRectF, QTime, Qt, QTimer
+from PyQt6.QtCore import QRectF, Qt, QTime, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -186,9 +186,7 @@ class PreferencesDialog(QDialog):
             check = QCheckBox(label)
             edit = QTimeEdit()
             edit.setDisplayFormat("HH:mm")
-            check.toggled.connect(
-                lambda value, k=key: self._on_meal_enabled(k, value)
-            )
+            check.toggled.connect(lambda value, k=key: self._on_meal_enabled(k, value))
             edit.timeChanged.connect(lambda value, k=key: self._on_meal_time(k, value))
             reminders_grid.addWidget(check, row, 0)
             reminders_grid.addWidget(edit, row, 1)
@@ -216,9 +214,9 @@ class PreferencesDialog(QDialog):
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self._reject)
-        buttons.button(
-            QDialogButtonBox.StandardButton.RestoreDefaults
-        ).clicked.connect(self._restore_defaults)
+        buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(
+            self._restore_defaults
+        )
         layout.addWidget(buttons)
 
         self._loading = True

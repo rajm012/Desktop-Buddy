@@ -83,9 +83,7 @@ def _paint_ground_shadow(
     shadow.setAlpha(int(58 * fade))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(shadow)
-    painter.drawEllipse(
-        QPointF(0.0, offset - 2.0), base_rx * fade, base_ry * fade
-    )
+    painter.drawEllipse(QPointF(0.0, offset - 2.0), base_rx * fade, base_ry * fade)
 
 
 class Mochi:
@@ -291,7 +289,9 @@ class Mochi:
             if sleeping:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(_pen(self.palette.outline, 2.4))
-                painter.drawArc(QRectF(cx - 6.5, cy - 3.5, 13.0, 9.0), 200 * 16, 140 * 16)
+                painter.drawArc(
+                    QRectF(cx - 6.5, cy - 3.5, 13.0, 9.0), 200 * 16, 140 * 16
+                )
                 continue
 
             painter.setBrush(QColor("#ffffff"))
@@ -512,7 +512,9 @@ class Ghost:
             if sleeping or happy_closed:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(_pen(self.palette.outline, 2.4))
-                painter.drawArc(QRectF(cx - 6.0, cy - 3.0, 12.0, 8.5), 200 * 16, 140 * 16)
+                painter.drawArc(
+                    QRectF(cx - 6.0, cy - 3.0, 12.0, 8.5), 200 * 16, 140 * 16
+                )
                 continue
             rx = 5.6 if surprised else 5.0
             ry = 8.6 if surprised else 7.2
@@ -645,9 +647,7 @@ class Robot:
         metal = QColor(self.palette.belly)
         return metal.darker(108)
 
-    def _joint(
-        self, painter: QPainter, point: QPointF, radius: float = 4.2
-    ) -> None:
+    def _joint(self, painter: QPainter, point: QPointF, radius: float = 4.2) -> None:
         painter.setBrush(self.palette.body_dark)
         painter.setPen(_pen(self.palette.outline, 1.5))
         painter.drawEllipse(point, radius, radius)
@@ -920,7 +920,9 @@ def make_character(species: str, palette: Palette):
 Character = Mochi
 
 
-def icon_pixmap(species: str, palette: Palette, size: int = 128, dpr: float = 1.0) -> QPixmap:
+def icon_pixmap(
+    species: str, palette: Palette, size: int = 128, dpr: float = 1.0
+) -> QPixmap:
     """Render a buddy's portrait as an application/tray icon."""
     device_size = max(16, int(size * dpr))
     pixmap = QPixmap(device_size, device_size)

@@ -8,15 +8,26 @@ version = "1.3.0"
 description = "A tiny robot or creature that lives on your Ubuntu desktop"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Desktop Buddy" }]
 dependencies = ["PyQt6>=6.6,<7"]
+
+[project.optional-dependencies]
+dev = ["build>=1.2,<2", "ruff>=0.8,<1"]
 
 [project.scripts]
 desktop-buddy = "desktop_buddy.app:main"
 
 [tool.setuptools]
 packages = ["desktop_buddy"]
+include-package-data = false
 
 [tool.setuptools.package-data]
 desktop_buddy = ["assets/*.svg", "assets/*.png"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

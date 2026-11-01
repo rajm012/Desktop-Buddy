@@ -103,6 +103,26 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
+CURRENT_CONFIG_SCHEMA_VERSION = 1
+
+
+def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade persisted settings without relying on user-facing names."""
+    migrated = dict(data)
+    try:
+        version = int(migrated.get("schema_version", 0))
+    except (TypeError, ValueError):
+        version = 0
+
+    if version < 1:
+        # Version 0 predates an explicit character field. At that point Mochi
+        # was the only renderer, so the migration is based on file structure,
+        # not on a possibly customized or translated display name.
+        migrated.setdefault("species", "mochi")
+        version = 1
+
+    migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
+    return migrated
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -125,6 +145,7 @@ def _valid_time(value: object, fallback: str) -> str:
 class Config:
     """User-facing settings, persisted as JSON."""
 
+    schema_version: int = CURRENT_CONFIG_SCHEMA_VERSION
     name: str = SPECIES[DEFAULT_SPECIES]["default_name"]
     species: str = DEFAULT_SPECIES
     theme: str = DEFAULT_THEME
@@ -166,12 +187,9 @@ class Config:
     # ------------------------------------------------------------------ load
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":
+        data = migrate_config(data)
         known = {f.name for f in fields(cls)}
         kwargs = {key: value for key, value in data.items() if key in known}
-        # Migration: configs written before the ghost existed had no species
-        # field and used the cat's default name.
-        if "species" not in data and kwargs.get("name", "Mochi") == "Mochi":
-            kwargs["name"] = SPECIES[DEFAULT_SPECIES]["default_name"]
         config = cls(**kwargs)
         config.normalize()
         return config
@@ -202,7 +220,15 @@ class Config:
 
     # --------------------------------------------------------------- helpers
     def normalize(self) -> None:
-        self.name = str(self.name).strip()[:24] or SPECIES[DEFAULT_SPECIES]["default_name"]
+        try:
+            self.schema_version = max(
+                int(self.schema_version), CURRENT_CONFIG_SCHEMA_VERSION
+            )
+        except (TypeError, ValueError):
+            self.schema_version = CURRENT_CONFIG_SCHEMA_VERSION
+        self.name = (
+            str(self.name).strip()[:24] or SPECIES[DEFAULT_SPECIES]["default_name"]
+        )
         if self.species not in SPECIES:
             self.species = DEFAULT_SPECIES
         if self.theme not in THEMES:

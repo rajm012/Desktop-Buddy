@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import datetime, timedelta
+from datetime import time as dtime
 from typing import Callable
+
+CURRENT_WELLNESS_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -29,11 +32,13 @@ class Reminder:
 
 @dataclass
 class ReminderState:
+    schema_version: int = CURRENT_WELLNESS_SCHEMA_VERSION
     last_done: dict[str, datetime] = field(default_factory=dict)
     snooze_until: dict[str, datetime] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, dict[str, str]]:
+    def to_dict(self) -> dict[str, object]:
         return {
+            "schema_version": self.schema_version,
             "last_done": {
                 key: value.isoformat() for key, value in self.last_done.items()
             },
@@ -43,8 +48,14 @@ class ReminderState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ReminderState":
-        state = cls()
+    def from_dict(cls, data: object) -> "ReminderState":
+        if not isinstance(data, dict):
+            return cls()
+        try:
+            version = int(data.get("schema_version", 0))
+        except (AttributeError, TypeError, ValueError):
+            version = 0
+        state = cls(schema_version=max(version, CURRENT_WELLNESS_SCHEMA_VERSION))
         for key, value in (data.get("last_done") or {}).items():
             try:
                 state.last_done[key] = datetime.fromisoformat(value)
@@ -258,7 +269,9 @@ class WellnessEngine:
         if not self.enabled(None):  # type: ignore[arg-type]
             return []
         result: list[Reminder] = []
-        grace = timedelta(minutes=int(getattr(self.config, "reminder_grace_minutes", 45)))
+        grace = timedelta(
+            minutes=int(getattr(self.config, "reminder_grace_minutes", 45))
+        )
         for reminder in self.reminders:
             snooze = self.state.snooze_until.get(reminder.id)
             if snooze is not None:
@@ -287,7 +300,10 @@ class WellnessEngine:
         self.state.snooze_until.pop(reminder.id, None)
 
     def snooze(
-        self, reminder: Reminder, minutes: int | None = None, now: datetime | None = None
+        self,
+        reminder: Reminder,
+        minutes: int | None = None,
+        now: datetime | None = None,
     ) -> datetime:
         now = now or self.now_fn()
         delay = int(minutes or reminder.snooze_minutes)
@@ -319,9 +335,7 @@ class WellnessEngine:
                 last = self.state.last_done.get(reminder.id, now)
                 scheduled = last + timedelta(minutes=reminder.interval_minutes)
                 if scheduled <= now:
-                    scheduled = now + timedelta(
-                        seconds=5
-                    )  # due now; show it first
+                    scheduled = now + timedelta(seconds=5)  # due now; show it first
                 entries.append((scheduled, reminder))
         entries.sort(key=lambda item: item[0])
         return entries[:count]

@@ -1,0 +1,2 @@
+include BENCHMARKS.md
+recursive-include docs *.md *.png

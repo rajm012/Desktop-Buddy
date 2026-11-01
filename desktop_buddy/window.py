@@ -25,9 +25,9 @@ from .character import (
     CANVAS_H,
     CANVAS_W,
     FOOT_PAD_UNITS,
+    Palette,
     make_character,
 )
-from .character import Palette
 from .config import Config
 from .effects import ParticleSystem
 from .platform_utils import on_battery, set_window_sticky
@@ -253,7 +253,10 @@ class BuddyWindow(QWidget):
         if self._species != config.species:
             self._character = make_character(config.species, self._palette)
             self._species = config.species
-        if config.species not in ("ghost", "robot") and self._brain.state is State.DANCE:
+        if (
+            config.species not in ("ghost", "robot")
+            and self._brain.state is State.DANCE
+        ):
             self._brain._to_idle()  # noqa: SLF001 - same package helper
         self._palette = Palette.from_colors(config.theme_colors())
         self._character.set_palette(self._palette)
@@ -537,7 +540,10 @@ class BuddyWindow(QWidget):
             self.context_menu_requested.emit(event.globalPosition().toPoint())
             event.accept()
             return
-        if event.button() == Qt.MouseButton.LeftButton and not self.config.click_through:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self.config.click_through
+        ):
             self._dragging = True
             self._brain.start_drag()
             position = event.globalPosition()

@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import shutil
 import sys
-import ctypes
 from pathlib import Path
 
 from . import APP_SLUG
 
-
-_X_ERROR_HANDLER_TYPE = ctypes.CFUNCTYPE(
-    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p
-)
+_X_ERROR_HANDLER_TYPE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
 
 
 @_X_ERROR_HANDLER_TYPE
@@ -209,4 +206,3 @@ def set_window_sticky(win_id: int) -> bool:
         return True
     except Exception:  # noqa: BLE001 - purely cosmetic, never fatal
         return False
-

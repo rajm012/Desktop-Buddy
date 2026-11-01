@@ -218,9 +218,7 @@ class Brain:
         screen = self.screen_world or self.world
         margin = self.tuning.edge_margin
         self.x = screen.clamp_x(x, margin)
-        self.y = max(
-            screen.ceiling + self.body_height + 2.0, min(screen.ground, y)
-        )
+        self.y = max(screen.ceiling + self.body_height + 2.0, min(screen.ground, y))
         self._drag_samples.append((now, self.x, self.y))
         if len(self._drag_samples) > 5:
             self._drag_samples.pop(0)
@@ -256,8 +254,10 @@ class Brain:
         """Climb up to (or follow) a window's top edge. True when started."""
         if self.state is State.DRAG:
             return False
-        if self.perch is not None and self.perch.matches(perch) and (
-            self.perched or self.state is State.CLIMB
+        if (
+            self.perch is not None
+            and self.perch.matches(perch)
+            and (self.perched or self.state is State.CLIMB)
         ):
             return False
         screen = self.screen_world or self.world
@@ -277,7 +277,11 @@ class Brain:
 
     def clear_perch(self) -> list[Event]:
         """Let go of the perch and fall/float back to the screen floor."""
-        if self.perch is None and not self.perched and self.world is (self.screen_world or self.world):
+        if (
+            self.perch is None
+            and not self.perched
+            and self.world is (self.screen_world or self.world)
+        ):
             return []
         self.perch = None
         self.perched = False
@@ -306,7 +310,10 @@ class Brain:
             return events
 
         if state is State.SLEEP:
-            if self._cursor_near(self.tuning.wake_radius) or self._idle_since_interaction < 0.25:
+            if (
+                self._cursor_near(self.tuning.wake_radius)
+                or self._idle_since_interaction < 0.25
+            ):
                 self._wake()
                 events.append(Event.WAKE)
             return events
@@ -384,7 +391,9 @@ class Brain:
         self.y = min(self.world.ground, max(self.world.ceiling, self.y))
 
     def _step_walk(self, dt: float, events: list[Event]) -> None:
-        speed = self.tuning.run_speed if self.state is State.RUN else self.tuning.walk_speed
+        speed = (
+            self.tuning.run_speed if self.state is State.RUN else self.tuning.walk_speed
+        )
         speed *= self.speed_scale
         direction = 1 if self._target_x >= self.x else -1
         self.facing = direction
@@ -417,7 +426,12 @@ class Brain:
             and self._cursor_near(self.tuning.cursor_radius)
             and self.perch is None
         )
-        weights: dict[str, float] = {"walk": 40.0, "jump": 20.0, "run": 12.0, "linger": 12.0}
+        weights: dict[str, float] = {
+            "walk": 40.0,
+            "jump": 20.0,
+            "run": 12.0,
+            "linger": 12.0,
+        }
         if self.can_dance:
             weights["dance"] = 16.0
         if curious:
@@ -461,7 +475,9 @@ class Brain:
     def _pick_target(self, span: float) -> float:
         margin = min(self.tuning.edge_margin, self.world.width / 4.0)
         direction = self.rng.choice((-1, 1))
-        target = self.world.clamp_x(self.x + direction * self.rng.uniform(90.0, span), margin)
+        target = self.world.clamp_x(
+            self.x + direction * self.rng.uniform(90.0, span), margin
+        )
         if abs(target - self.x) < 60.0:
             target = self.world.clamp_x(
                 self.x - direction * self.rng.uniform(90.0, span), margin
