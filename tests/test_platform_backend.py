@@ -77,10 +77,15 @@ class LinuxBackendTests(unittest.TestCase):
                 Capability.WORKSPACE_BEHAVIOR,
                 Capability.CLICK_THROUGH,
                 Capability.AUTOSTART,
-                Capability.AUDIO,
             ):
                 with self.subTest(capability=capability):
                     self.assertTrue(backend.supports(capability))
+            audio = backend.capability(Capability.AUDIO)
+            self.assertEqual(audio.available, backend.audio_available)
+            if not audio.available:
+                self.assertEqual(
+                    audio.reason, "Qt Multimedia audio support is unavailable."
+                )
 
     def test_server_name_is_scoped_to_user_session_without_uid(self) -> None:
         first = LinuxBackend(env={"XDG_SESSION_ID": "session-a"}).server_name()
