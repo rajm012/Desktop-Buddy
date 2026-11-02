@@ -25,7 +25,7 @@ from .character import Palette
 from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
 from .platforms import get_backend
 from .platforms.base import Capability, PlatformBackend
-from .prefs import PreferencesDialog
+from .prefs import OnboardingDialog, PreferencesDialog
 from .sound import chime_path
 from .toast import ReminderToast
 from .tray import BuddyTray
@@ -198,7 +198,7 @@ class Controller(QObject):
         self.window.show()
         QTimer.singleShot(6000, self._check_reminders)
         if first_run:
-            QTimer.singleShot(1200, self._greet)
+            QTimer.singleShot(700, self.open_onboarding)
 
     # ------------------------------------------------------------------ config
     def _schedule_save(self) -> None:
@@ -216,8 +216,18 @@ class Controller(QObject):
 
     def apply_snapshot(self, snapshot: dict) -> None:
         restored = Config.from_dict(snapshot)
+        requested_autostart = restored.autostart
         for field_info in fields(Config):
             setattr(self.config, field_info.name, getattr(restored, field_info.name))
+        if (
+            self.backend.supports(Capability.AUTOSTART)
+            and self.backend.autostart_enabled() != requested_autostart
+        ):
+            try:
+                self.backend.set_autostart(requested_autostart)
+            except OSError as exc:
+                log.warning("Could not restore autostart setting: %s", exc)
+        self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
         self._rebuild_wellness()
         self.tray.refresh()
@@ -225,6 +235,12 @@ class Controller(QObject):
 
     def reset_config(self) -> None:
         self.config.reset()
+        if self.backend.supports(Capability.AUTOSTART):
+            try:
+                self.backend.set_autostart(False)
+            except OSError as exc:
+                log.warning("Could not reset autostart setting: %s", exc)
+        self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
         self._rebuild_wellness()
         self.tray.refresh()
@@ -268,6 +284,22 @@ class Controller(QObject):
             return
         self.config.reduce_on_battery = bool(enabled)
         self.window.apply_config()
+        self.tray.refresh()
+        self._schedule_save()
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self.config.reduced_motion = bool(enabled)
+        self.window.apply_config()
+        self.tray.refresh()
+        self._schedule_save()
+
+    def set_silent_mode(self, enabled: bool) -> None:
+        self.config.silent_mode = bool(enabled)
+        self.tray.refresh()
+        self._schedule_save()
+
+    def set_do_not_disturb(self, enabled: bool) -> None:
+        self.config.do_not_disturb = bool(enabled)
         self.tray.refresh()
         self._schedule_save()
 
@@ -372,7 +404,7 @@ class Controller(QObject):
             log.warning("Could not save reminder state: %s", exc)
 
     def _check_reminders(self) -> None:
-        if not self.config.reminders_enabled:
+        if not self.config.reminders_enabled or self.config.do_not_disturb:
             return
         now = datetime.now()
         for reminder in self._wellness.due(now):
@@ -389,7 +421,11 @@ class Controller(QObject):
             "winddown": "Wind down 🌙",
         }.get(reminder.kind, f"{reminder.title}!")
         self.window.remind(reminder.kind, short)
-        if self.config.reminder_sound and self.backend.supports(Capability.AUDIO):
+        if (
+            self.config.reminder_sound
+            and not self.config.silent_mode
+            and self.backend.supports(Capability.AUDIO)
+        ):
             self.backend.play_audio(chime_path(reminder.kind, self._state_dir))
         self._queue_toast(reminder, message)
         if manual:
@@ -573,6 +609,12 @@ class Controller(QObject):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def open_onboarding(self) -> None:
+        dialog = OnboardingDialog(self)
+        dialog.exec()
+        self.save_config()
+        self._greet()
 
     def show_about(self, *_args: object) -> None:
         from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR

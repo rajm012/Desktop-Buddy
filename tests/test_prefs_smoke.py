@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 from desktop_buddy.config import Config  # noqa: E402
 from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.platforms.linux import LinuxBackend  # noqa: E402
-from desktop_buddy.prefs import PreferencesDialog  # noqa: E402
+from desktop_buddy.prefs import OnboardingDialog, PreferencesDialog  # noqa: E402
 
 
 class _StubController:
@@ -21,6 +21,13 @@ class _StubController:
     def __init__(self, backend=None) -> None:  # noqa: ANN001
         self.config = Config()
         self.backend = backend or GenericPlatformBackend()
+
+    def autostart_active(self) -> bool:
+        return False
+
+    def apply_snapshot(self, snapshot: dict) -> None:
+        restored = Config.from_dict(snapshot)
+        self.config.__dict__.update(restored.__dict__)
 
     def __getattr__(self, _name: str):
         return lambda *args, **kwargs: None
@@ -40,6 +47,11 @@ class PreferencesSmokeTests(unittest.TestCase):
         self.assertEqual(dialog.water_slider.minimum(), 10)
         self.assertFalse(dialog.check_click.isEnabled())
         self.assertIn("unavailable", dialog.capability_notice.text().lower())
+        self.assertEqual(
+            [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+            list(PreferencesDialog.TAB_NAMES),
+        )
+        self.assertLessEqual(dialog.height(), 700)
         dialog.close()
 
     def test_dialog_survives_theme_and_species_change(self) -> None:
@@ -60,6 +72,23 @@ class PreferencesSmokeTests(unittest.TestCase):
         self.assertFalse(dialog.check_top.isEnabled())
         self.assertFalse(dialog.check_perch.isEnabled())
         self.assertIn("Wayland", dialog.capability_notice.text())
+        dialog.close()
+
+    def test_cancel_restores_the_opening_snapshot(self) -> None:
+        controller = _StubController()
+        dialog = PreferencesDialog(controller)
+        controller.config.scale = 1.6
+        controller.config.reduced_motion = True
+        dialog.reject()
+        self.assertEqual(controller.config.scale, Config().scale)
+        self.assertFalse(controller.config.reduced_motion)
+
+    def test_onboarding_contains_phase_two_choices(self) -> None:
+        dialog = OnboardingDialog(_StubController())
+        self.assertGreater(dialog.species_combo.count(), 1)
+        self.assertEqual(dialog.scale_slider.minimum(), 50)
+        self.assertEqual(dialog.active_start.displayFormat(), "HH:mm")
+        self.assertFalse(dialog.autostart.isEnabled())
         dialog.close()
 
 

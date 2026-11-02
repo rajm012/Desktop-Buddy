@@ -142,6 +142,16 @@ class BehaviourTests(unittest.TestCase):
         self.assertLess(ghost.vy, cat.vy)
         self.assertLess(ghost.y, cat.y)  # smaller y = closer to the ceiling
 
+    def test_reduced_motion_blocks_high_energy_actions(self) -> None:
+        brain = make_brain(can_dance=True, reduced_motion=True)
+        events = brain.poke()
+        self.assertEqual(events, [Event.POKE])
+        self.assertIs(brain.state, State.IDLE)
+        for _ in range(100):
+            brain._idle_left = 0.0
+            brain.step(0.05)
+            self.assertNotIn(brain.state, (State.RUN, State.AIR, State.DANCE))
+
 
 class PerchTests(unittest.TestCase):
     def test_climbs_to_window_top_and_stays_there(self) -> None:

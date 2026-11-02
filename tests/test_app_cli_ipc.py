@@ -12,7 +12,45 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtNetwork import QLocalSocket  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from desktop_buddy.app import LocalCommandServer, build_parser  # noqa: E402
+from desktop_buddy.app import Controller, LocalCommandServer, build_parser  # noqa: E402
+from desktop_buddy.config import Config  # noqa: E402
+from desktop_buddy.platforms.base import Capability  # noqa: E402
+
+
+class _ToggleBackend:
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+    def supports(self, capability: Capability) -> bool:
+        return capability is Capability.AUTOSTART
+
+    def autostart_enabled(self) -> bool:
+        return self.enabled
+
+    def set_autostart(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+
+class _RefreshTarget:
+    def apply_config(self) -> None:
+        return None
+
+    def refresh(self) -> None:
+        return None
+
+
+class _ControllerHarness:
+    def __init__(self, autostart: bool) -> None:
+        self.config = Config(autostart=autostart)
+        self.backend = _ToggleBackend(autostart)
+        self.window = _RefreshTarget()
+        self.tray = _RefreshTarget()
+
+    def _rebuild_wellness(self) -> None:
+        return None
+
+    def _schedule_save(self) -> None:
+        return None
 
 
 class CliParserTests(unittest.TestCase):
@@ -52,6 +90,23 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.diagnose)
         self.assertTrue(args.reset_config)
         self.assertTrue(args.verbose)
+
+
+class ConfigTransactionTests(unittest.TestCase):
+    def test_snapshot_restores_external_autostart_state(self) -> None:
+        harness = _ControllerHarness(autostart=True)
+        snapshot = harness.config.to_dict()
+        harness.config.autostart = False
+        harness.backend.set_autostart(False)
+        Controller.apply_snapshot(harness, snapshot)
+        self.assertTrue(harness.config.autostart)
+        self.assertTrue(harness.backend.autostart_enabled())
+
+    def test_reset_disables_external_autostart_state(self) -> None:
+        harness = _ControllerHarness(autostart=True)
+        Controller.reset_config(harness)
+        self.assertFalse(harness.config.autostart)
+        self.assertFalse(harness.backend.autostart_enabled())
 
 
 class LocalIpcTests(unittest.TestCase):

@@ -100,20 +100,20 @@ Goal: make the growing feature set understandable.
 
 ### Steps
 
-1. Split preferences into tabs: Character, Behaviour, Reminders, Focus,
+1. [x] Split preferences into tabs: Character, Behaviour, Reminders, Focus,
    Integrations and System.
-2. Add first-run onboarding for character, scale, reminder hours and autostart.
-3. Add a platform capability/permission status page.
-4. Add reduced-motion, silent and do-not-disturb options.
-5. Add import, export and reset controls for configuration.
-6. Add a preview for themes and important animation states.
+2. [x] Add first-run onboarding for character, scale, reminder hours and autostart.
+3. [x] Add a platform capability/permission status page.
+4. [x] Add reduced-motion, silent and do-not-disturb options.
+5. [x] Add import, export and reset controls for configuration.
+6. [x] Add a preview for themes and important animation states.
 
 ### Acceptance criteria
 
-- Preferences fit on common laptop screens.
-- Every background integration can be disabled.
-- Cancel reliably restores the previous configuration.
-- Reduced-motion mode removes high-energy movement and particles.
+- [x] Preferences fit on common laptop screens.
+- [x] Every background integration can be disabled.
+- [x] Cancel reliably restores the previous configuration.
+- [x] Reduced-motion mode removes high-energy movement and particles.
 
 ---
 

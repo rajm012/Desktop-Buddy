@@ -74,7 +74,11 @@ class BuddyWindow(QWidget):
         self._grab_dx = 0.0
         self._grab_dy = 0.0
         self._last_move: tuple[int, int] | None = None
-        self._on_battery = self.backend.battery_status().on_battery
+        self._on_battery = (
+            self.backend.battery_status().on_battery
+            if config.reduce_on_battery
+            else False
+        )
         self._battery_countdown = 10.0
         self._zzz_timer = 0.6
         self._note_timer = 0.2
@@ -156,6 +160,7 @@ class BuddyWindow(QWidget):
         brain.playful = config.playful
         brain.can_sleep = config.can_sleep
         brain.sleep_after = config.sleep_after
+        brain.reduced_motion = config.reduced_motion
         self._configure_brain_for_species(brain, config.species)
         if config.position_x is not None:
             brain.x = world.clamp_x(config.position_x, brain.tuning.edge_margin)
@@ -227,6 +232,9 @@ class BuddyWindow(QWidget):
         self.update()
 
     def dance(self) -> None:
+        if self.config.reduced_motion:
+            self.say("Reduced motion is on.", 2.5)
+            return
         for event in self._brain.dance():
             self._handle_event(event)
         self.update()
@@ -234,6 +242,9 @@ class BuddyWindow(QWidget):
     def remind(self, kind: str, text: str) -> None:
         """Play a little attention animation for a wellness reminder."""
         self.say(text, seconds=9.0)
+        if self.config.reduced_motion:
+            self.update()
+            return
         if kind == "water":
             self._particles.emit("drops", 0.0, -34.0, self._palette)
         elif kind == "meal":
@@ -261,6 +272,7 @@ class BuddyWindow(QWidget):
         self._brain.playful = config.playful
         self._brain.can_sleep = config.can_sleep
         self._brain.sleep_after = config.sleep_after
+        self._brain.reduced_motion = config.reduced_motion
         self._configure_brain_for_species(self._brain, config.species)
         if self._species != config.species:
             self._character = make_character(config.species, self._palette)
@@ -272,6 +284,12 @@ class BuddyWindow(QWidget):
             self._brain._to_idle()  # noqa: SLF001 - same package helper
         self._palette = Palette.from_colors(config.theme_colors())
         self._character.set_palette(self._palette)
+        if config.reduced_motion:
+            self._particles.clear()
+            if self._brain.state in (State.RUN, State.AIR, State.DANCE):
+                self._brain._to_idle()  # noqa: SLF001 - same package helper
+                self._brain.y = self._brain.world.ground
+                self._brain.vy = 0.0
         self.setWindowTitle(config.name)
         self._apply_size()
         self._apply_flags()
@@ -368,12 +386,14 @@ class BuddyWindow(QWidget):
         self._last_tick = now
 
         self._battery_countdown -= dt
-        if self._battery_countdown <= 0.0:
+        if self.config.reduce_on_battery and self._battery_countdown <= 0.0:
             self._battery_countdown = 15.0
             value = self.backend.battery_status().on_battery
             if value != self._on_battery:
                 self._on_battery = value
                 self._update_timer()
+        elif not self.config.reduce_on_battery:
+            self._battery_countdown = 0.0
 
         if self._bubble_left > 0.0:
             self._bubble_left = max(0.0, self._bubble_left - dt)
@@ -387,13 +407,16 @@ class BuddyWindow(QWidget):
         self._brain.set_cursor(float(cursor.x()), float(cursor.y()))
         for event in self._brain.step(dt):
             self._handle_event(event)
-        self._update_zzz(dt)
-        self._update_species_effects(dt)
+        if not self.config.reduced_motion:
+            self._update_zzz(dt)
+            self._update_species_effects(dt)
         self._particles.update(dt)
         self._move_window()
         self.update()
 
     def _handle_event(self, event: Event) -> None:
+        if self.config.reduced_motion:
+            return
         if event is Event.JUMP:
             self._particles.emit("sparkles", 0.0, -18.0, self._palette)
         elif event is Event.LAND:

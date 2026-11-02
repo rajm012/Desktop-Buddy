@@ -102,6 +102,25 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.dinner_time, "21:00")
         self.assertEqual(config.water_interval_minutes, 45)
 
+    def test_attention_defaults(self) -> None:
+        config = Config()
+        self.assertFalse(config.reduced_motion)
+        self.assertFalse(config.silent_mode)
+        self.assertFalse(config.do_not_disturb)
+
+    def test_attention_flags_roundtrip(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+                "reduced_motion": True,
+                "silent_mode": True,
+                "do_not_disturb": True,
+            }
+        )
+        self.assertTrue(config.reduced_motion)
+        self.assertTrue(config.silent_mode)
+        self.assertTrue(config.do_not_disturb)
+
     def test_invalid_times_are_normalized(self) -> None:
         config = Config.from_dict({"lunch_time": "25:99", "water_interval_minutes": 5})
         self.assertEqual(config.lunch_time, "13:30")

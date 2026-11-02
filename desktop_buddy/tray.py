@@ -75,6 +75,14 @@ class BuddyTray(QObject):
             "Reduce motion on battery", controller.set_reduce_on_battery
         )
         self.act_battery.setCheckable(True)
+        self.act_reduced = menu.addAction(
+            "Reduced motion", controller.set_reduced_motion
+        )
+        self.act_reduced.setCheckable(True)
+        self.act_silent = menu.addAction("Silent mode", controller.set_silent_mode)
+        self.act_silent.setCheckable(True)
+        self.act_dnd = menu.addAction("Do not disturb", controller.set_do_not_disturb)
+        self.act_dnd.setCheckable(True)
         self.act_playful = menu.addAction("Playful with cursor", controller.set_playful)
         self.act_playful.setCheckable(True)
         self.act_sleep = menu.addAction("Sleep when idle", controller.set_can_sleep)
@@ -174,6 +182,9 @@ class BuddyTray(QObject):
         self.act_top.setChecked(config.always_on_top)
         self.act_click.setChecked(config.click_through)
         self.act_battery.setChecked(config.reduce_on_battery)
+        self.act_reduced.setChecked(config.reduced_motion)
+        self.act_silent.setChecked(config.silent_mode)
+        self.act_dnd.setChecked(config.do_not_disturb)
         self.act_playful.setChecked(config.playful)
         self.act_sleep.setChecked(config.can_sleep)
         self.act_perch.setChecked(config.perch_on_windows)

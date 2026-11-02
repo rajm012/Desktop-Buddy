@@ -112,6 +112,7 @@ class Brain:
     can_sleep: bool = True
     sleep_after: float = 180.0
     can_dance: bool = False
+    reduced_motion: bool = False
     gravity_scale: float = 1.0
     max_fall_speed: float = 1500.0
     jump_scale: float = 1.0
@@ -181,6 +182,8 @@ class Brain:
         """Double-click interaction: dance when supported, otherwise happy hop."""
         events: list[Event] = [Event.POKE]
         self.note_interaction()
+        if self.reduced_motion:
+            return events
         if self.state not in (State.AIR, State.DRAG, State.CLIMB, State.DANCE):
             if self.can_dance:
                 events.extend(self.dance())
@@ -191,6 +194,8 @@ class Brain:
     def dance(self) -> list[Event]:
         """Start a little dance party."""
         self.note_interaction()
+        if self.reduced_motion:
+            return []
         if self.state in (State.AIR, State.DRAG, State.CLIMB):
             return []
         if self.state is State.DANCE:
@@ -403,7 +408,7 @@ class Brain:
         if distance <= max(2.5, speed * dt):
             self.x = self._target_x
             self._to_idle()
-        elif self.rng.random() < 0.13 * dt:
+        elif not self.reduced_motion and self.rng.random() < 0.13 * dt:
             self._start_jump(events, direction=direction)
 
     def _step_idle(self, dt: float, events: list[Event]) -> None:
@@ -420,19 +425,23 @@ class Brain:
             return
 
         curious = (
-            self.playful
+            not self.reduced_motion
+            and self.playful
             and self.cursor is not None
             and self._cursor_dwell > 1.0
             and self._cursor_near(self.tuning.cursor_radius)
             and self.perch is None
         )
-        weights: dict[str, float] = {
-            "walk": 40.0,
-            "jump": 20.0,
-            "run": 12.0,
-            "linger": 12.0,
-        }
-        if self.can_dance:
+        if self.reduced_motion:
+            weights: dict[str, float] = {"walk": 35.0, "linger": 65.0}
+        else:
+            weights = {
+                "walk": 40.0,
+                "jump": 20.0,
+                "run": 12.0,
+                "linger": 12.0,
+            }
+        if self.can_dance and not self.reduced_motion:
             weights["dance"] = 16.0
         if curious:
             weights = {"chase": 55.0, "jump": 15.0, "linger": 15.0}

@@ -37,7 +37,10 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Eyes follow the cursor; the buddy chases it when playful
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
-- Preferences dialog with a **live animated preview**
+- Six-tab preferences dialog with theme and animation-state previews, platform
+  capability status, and import/export/reset controls
+- First-run onboarding for character, size, reminder hours and login startup
+- Reduced motion, silent mode and do-not-disturb attention controls
 - 7 colour themes, adjustable size / speed / frame rate / sleep timeout
 - Adaptive frame rate and a battery saver (lower fps on battery)
 - Remembers its position and settings between sessions
@@ -112,7 +115,7 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `schema_version` | `1` | Persisted-format version used for automatic upgrades |
+| `schema_version` | `2` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
@@ -122,6 +125,9 @@ but hand-editable too):
 | `always_on_top` | `true` | Keep above other windows |
 | `click_through` | `false` | Mouse input passes through to apps below |
 | `reduce_on_battery` | `true` | 20 fps active / 12 fps idle on battery |
+| `reduced_motion` | `false` | Disable runs, jumps, dances and particles |
+| `silent_mode` | `false` | Disable all application sounds |
+| `do_not_disturb` | `false` | Pause automatic reminder interruptions |
 | `playful` | `true` | Chase the cursor sometimes |
 | `can_sleep` | `true` | Nap after being idle |
 | `sleep_after` | `180` | Seconds of no interaction before sleeping |

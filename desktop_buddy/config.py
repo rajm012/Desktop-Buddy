@@ -98,7 +98,7 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
-CURRENT_CONFIG_SCHEMA_VERSION = 1
+CURRENT_CONFIG_SCHEMA_VERSION = 2
 
 
 def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
@@ -115,6 +115,12 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         # not on a possibly customized or translated display name.
         migrated.setdefault("species", "mochi")
         version = 1
+
+    if version < 2:
+        migrated.setdefault("reduced_motion", False)
+        migrated.setdefault("silent_mode", False)
+        migrated.setdefault("do_not_disturb", False)
+        version = 2
 
     migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
     return migrated
@@ -150,6 +156,9 @@ class Config:
     always_on_top: bool = True
     click_through: bool = False
     reduce_on_battery: bool = True
+    reduced_motion: bool = False
+    silent_mode: bool = False
+    do_not_disturb: bool = False
     playful: bool = True
     can_sleep: bool = True
     sleep_after: float = 180.0
@@ -244,6 +253,9 @@ class Config:
             "always_on_top",
             "click_through",
             "reduce_on_battery",
+            "reduced_motion",
+            "silent_mode",
+            "do_not_disturb",
             "playful",
             "can_sleep",
             "perch_on_windows",
