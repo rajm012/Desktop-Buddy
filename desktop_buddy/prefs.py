@@ -38,6 +38,7 @@ from .character import Palette, make_character
 from .config import SPECIES, THEMES, Config
 from .focus import FocusStatus, SessionKind, format_duration, kind_label
 from .platforms.base import Capability
+from .plugins import PluginPermission, PluginStatus
 from .wellness import Reminder, parse_reminder_phrase
 
 
@@ -152,6 +153,10 @@ class ReminderEditDialog(QDialog):
             action = ActionDefinition.from_dict(item)
             if action is not None:
                 self.action_combo.addItem(action.name, action.id)
+        plugin_actions = getattr(controller, "_plugin_actions", {})
+        if isinstance(plugin_actions, dict):
+            for action_id, (name, _callback) in sorted(plugin_actions.items()):
+                self.action_combo.addItem(f"{name} (plugin)", action_id)
         if reminder and reminder.action_id:
             index = self.action_combo.findData(reminder.action_id)
             if index >= 0:
@@ -325,6 +330,64 @@ class ActionEditDialog(QDialog):
         self.accept()
 
 
+class PluginPermissionsDialog(QDialog):
+    """Explicit per-plugin permission grant editor."""
+
+    DESCRIPTIONS = {
+        PluginPermission.ACTIONS: "Add safe actions to the action registry",
+        PluginPermission.REMINDERS: "Add reminder definitions while enabled",
+        PluginPermission.TRAY: "Add commands to the Plugins tray menu",
+        PluginPermission.SETTINGS: "Add a page to Preferences",
+        PluginPermission.EVENTS: "Subscribe to and publish application events",
+    }
+
+    def __init__(self, record, granted: set[PluginPermission], parent=None) -> None:  # noqa: ANN001
+        super().__init__(parent)
+        self.record = record
+        self.setWindowTitle(f"Permissions — {record.metadata.name}")
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            f"{record.metadata.name} requests these permissions. The plugin cannot "
+            "be enabled until every declared permission is granted."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        if not record.metadata.builtin:
+            warning = QLabel(
+                "External plugins are Python code and are not a security sandbox. "
+                "Install and enable only plugins whose source you trust."
+            )
+            warning.setWordWrap(True)
+            warning.setStyleSheet(
+                "background:#ffe4df;color:#7a2418;border:1px solid #e6a79d;"
+                "border-radius:6px;padding:7px;"
+            )
+            layout.addWidget(warning)
+        self.checks: dict[PluginPermission, QCheckBox] = {}
+        for permission in record.metadata.permissions:
+            check = QCheckBox(f"{permission.value} — {self.DESCRIPTIONS[permission]}")
+            check.setChecked(permission in granted)
+            self.checks[permission] = check
+            layout.addWidget(check)
+        capabilities = ", ".join(record.metadata.required_capabilities) or "none"
+        capability_label = QLabel(f"Required platform capabilities: {capabilities}")
+        capability_label.setWordWrap(True)
+        layout.addWidget(capability_label)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def permissions(self) -> set[PluginPermission]:
+        return {
+            permission for permission, check in self.checks.items() if check.isChecked()
+        }
+
+
 class PreferencesDialog(QDialog):
     """Compact tabbed settings editor with live preview and safe cancellation."""
 
@@ -355,6 +418,7 @@ class PreferencesDialog(QDialog):
         self._build_focus_tab()
         self._build_integrations_tab()
         self._build_system_tab()
+        self._build_plugin_tabs()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -621,6 +685,35 @@ class PreferencesDialog(QDialog):
         )
         layout.addWidget(self.check_perch)
         layout.addWidget(self.check_autostart)
+        plugins_group = QGroupBox("Plugins")
+        plugins_layout = QVBoxLayout(plugins_group)
+        plugin_help = QLabel(
+            "Plugins are optional and disabled unless explicitly enabled. Built-ins "
+            "load before external plugins from the user plugin directory."
+        )
+        plugin_help.setWordWrap(True)
+        plugins_layout.addWidget(plugin_help)
+        self.plugin_list = QListWidget()
+        self.plugin_list.currentItemChanged.connect(
+            lambda _current, _previous: self._show_plugin_details()
+        )
+        plugins_layout.addWidget(self.plugin_list)
+        self.plugin_details = QLabel()
+        self.plugin_details.setWordWrap(True)
+        plugins_layout.addWidget(self.plugin_details)
+        plugin_buttons = QHBoxLayout()
+        self.plugin_permissions_button = QPushButton("Permissions…")
+        self.plugin_enable_button = QPushButton("Enable")
+        self.plugin_disable_button = QPushButton("Disable")
+        self.plugin_permissions_button.clicked.connect(self._edit_plugin_permissions)
+        self.plugin_enable_button.clicked.connect(self._enable_plugin)
+        self.plugin_disable_button.clicked.connect(self._disable_plugin)
+        plugin_buttons.addWidget(self.plugin_permissions_button)
+        plugin_buttons.addWidget(self.plugin_enable_button)
+        plugin_buttons.addWidget(self.plugin_disable_button)
+        plugin_buttons.addStretch()
+        plugins_layout.addLayout(plugin_buttons)
+        layout.addWidget(plugins_group, 1)
         actions_group = QGroupBox("Quick actions")
         actions_layout = QVBoxLayout(actions_group)
         actions_help = QLabel(
@@ -651,6 +744,22 @@ class PreferencesDialog(QDialog):
         action_buttons.addStretch()
         actions_layout.addLayout(action_buttons)
         layout.addWidget(actions_group, 1)
+
+    def _build_plugin_tabs(self) -> None:
+        provider = getattr(self.controller, "plugin_settings_pages", None)
+        if not callable(provider):
+            return
+        pages = provider() or []
+        for _page_id, plugin_id, title, factory in pages:
+            try:
+                page = factory(self)
+            except Exception as exc:  # noqa: BLE001 - plugin boundary fallback
+                manager = getattr(self.controller, "_plugins", None)
+                if manager is not None and hasattr(manager, "report_failure"):
+                    manager.report_failure(plugin_id, exc, "settings page")
+                continue
+            if isinstance(page, QWidget):
+                self.tabs.addTab(page, title)
 
     def _build_system_tab(self) -> None:
         _, layout = self._page("System")
@@ -763,6 +872,7 @@ class PreferencesDialog(QDialog):
         self.check_chime.setChecked(config.reminder_sound)
         self.refresh_reminders()
         self.refresh_actions()
+        self.refresh_plugins()
         self.preview.refresh()
 
     def _apply_capabilities(self) -> None:
@@ -888,6 +998,117 @@ class PreferencesDialog(QDialog):
             self.action_list.addItem(item)
             if action.id == selected:
                 self.action_list.setCurrentItem(item)
+
+    def refresh_plugins(self) -> None:
+        selected = self._selected_id(self.plugin_list)
+        self.plugin_list.clear()
+        manager = getattr(self.controller, "_plugins", None)
+        records = getattr(manager, "records", None)
+        if not isinstance(records, dict):
+            self.plugin_details.setText("Plugin manager unavailable.")
+            self.plugin_enable_button.setEnabled(False)
+            self.plugin_disable_button.setEnabled(False)
+            self.plugin_permissions_button.setEnabled(False)
+            return
+        for plugin_id, record in records.items():
+            origin = "built-in" if record.metadata.builtin else "external"
+            item = QListWidgetItem(
+                f"{record.metadata.name} {record.metadata.version} — "
+                f"{record.status.value} · {origin}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, plugin_id)
+            self.plugin_list.addItem(item)
+            if plugin_id == selected:
+                self.plugin_list.setCurrentItem(item)
+        if self.plugin_list.currentItem() is None and self.plugin_list.count():
+            self.plugin_list.setCurrentRow(0)
+        self._show_plugin_details()
+
+    def _selected_plugin_record(self):  # noqa: ANN201
+        plugin_id = self._selected_id(self.plugin_list)
+        manager = getattr(self.controller, "_plugins", None)
+        records = getattr(manager, "records", {})
+        return records.get(plugin_id) if isinstance(records, dict) else None
+
+    def _show_plugin_details(self) -> None:
+        record = self._selected_plugin_record()
+        if record is None:
+            self.plugin_details.setText("No plugin selected.")
+            self.plugin_enable_button.setEnabled(False)
+            self.plugin_disable_button.setEnabled(False)
+            self.plugin_permissions_button.setEnabled(False)
+            return
+        manager = self.controller._plugins  # noqa: SLF001
+        granted = manager.granted_permissions(record.metadata.id)
+        requested = (
+            ", ".join(permission.value for permission in record.metadata.permissions)
+            or "none"
+        )
+        granted_text = ", ".join(sorted(item.value for item in granted)) or "none"
+        capabilities = ", ".join(record.metadata.required_capabilities) or "none"
+        text = (
+            f"{record.metadata.description or 'No description.'}\n"
+            f"Permissions: {granted_text} / requested {requested}\n"
+            f"Required capabilities: {capabilities}"
+        )
+        if record.error:
+            text += f"\nError: {record.error}"
+        self.plugin_details.setText(text)
+        active = record.status is PluginStatus.ACTIVE
+        self.plugin_enable_button.setEnabled(not active)
+        self.plugin_disable_button.setEnabled(active)
+        self.plugin_permissions_button.setEnabled(True)
+
+    def _edit_plugin_permissions(self) -> bool:
+        record = self._selected_plugin_record()
+        if record is None:
+            return False
+        manager = self.controller._plugins  # noqa: SLF001
+        dialog = PluginPermissionsDialog(
+            record, manager.granted_permissions(record.metadata.id), self
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        values = [permission.value for permission in dialog.permissions()]
+        self.controller.set_plugin_permissions(record.metadata.id, values)
+        self.refresh_plugins()
+        return True
+
+    def _enable_plugin(self) -> None:
+        record = self._selected_plugin_record()
+        if record is None:
+            return
+        manager = self.controller._plugins  # noqa: SLF001
+        required = set(record.metadata.permissions)
+        granted = manager.granted_permissions(record.metadata.id)
+        if required - granted and not self._edit_plugin_permissions():
+            return
+        if not record.metadata.builtin:
+            answer = QMessageBox.warning(
+                self,
+                "Enable external plugin?",
+                "External plugins execute Python code with your user account. "
+                "Permissions limit Desktop Buddy APIs but are not an operating-system "
+                "sandbox. Enable only source you trust.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer is not QMessageBox.StandardButton.Yes:
+                return
+        if not self.controller.set_plugin_enabled(record.metadata.id, True):
+            refreshed = manager.records.get(record.metadata.id, record)
+            QMessageBox.warning(
+                self,
+                "Plugin not enabled",
+                refreshed.error or "The plugin could not be enabled.",
+            )
+        self.refresh_plugins()
+
+    def _disable_plugin(self) -> None:
+        record = self._selected_plugin_record()
+        if record is not None:
+            self.controller.set_plugin_enabled(record.metadata.id, False)
+            self.refresh_plugins()
 
     @staticmethod
     def _selected_id(widget: QListWidget) -> str | None:

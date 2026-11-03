@@ -9,10 +9,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from desktop_buddy.builtin_plugins import (  # noqa: E402
+    EXAMPLE_PLUGIN_METADATA,
+    ExampleRoutinePlugin,
+)
 from desktop_buddy.config import Config  # noqa: E402
 from desktop_buddy.focus import FocusEngine, FocusSettings  # noqa: E402
 from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.platforms.linux import LinuxBackend  # noqa: E402
+from desktop_buddy.plugins import PluginHost, PluginManager  # noqa: E402
 from desktop_buddy.prefs import (  # noqa: E402
     ActionEditDialog,
     OnboardingDialog,
@@ -28,6 +33,28 @@ class _StubController:
         self.config = Config()
         self.backend = backend or GenericPlatformBackend()
         self._focus = FocusEngine(FocusSettings.from_config(self.config))
+        self._plugin_pages = {}
+
+        def cleanup() -> None:
+            return None
+
+        def register_settings(plugin_id, page_id, title, factory):  # noqa: ANN001, ANN202
+            self._plugin_pages[page_id] = (plugin_id, title, factory)
+            return lambda: self._plugin_pages.pop(page_id, None)
+
+        host = PluginHost(
+            lambda *_args: cleanup,
+            lambda *_args: cleanup,
+            lambda *_args: cleanup,
+            register_settings,
+        )
+        self._plugins = PluginManager(
+            app_version="1.6.0",
+            config_state=self.config.plugins,
+            available_capabilities=set(),
+            host=host,
+        )
+        self._plugins.register_builtin(EXAMPLE_PLUGIN_METADATA, ExampleRoutinePlugin)
 
     def autostart_active(self) -> bool:
         return False
@@ -35,6 +62,24 @@ class _StubController:
     def apply_snapshot(self, snapshot: dict) -> None:
         restored = Config.from_dict(snapshot)
         self.config.__dict__.update(restored.__dict__)
+
+    def plugin_settings_pages(self):  # noqa: ANN201
+        return [
+            (page_id, plugin_id, title, factory)
+            for page_id, (plugin_id, title, factory) in self._plugin_pages.items()
+        ]
+
+    def set_plugin_permissions(self, plugin_id: str, permissions: list[str]) -> bool:
+        from desktop_buddy.plugins import PluginPermission
+
+        return self._plugins.set_permissions(
+            plugin_id, {PluginPermission(value) for value in permissions}
+        )
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> bool:
+        if enabled:
+            return self._plugins.enable(plugin_id)
+        return self._plugins.disable(plugin_id)
 
     def __getattr__(self, _name: str):
         return lambda *args, **kwargs: None
@@ -53,6 +98,7 @@ class PreferencesSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(dialog.reminder_list.count(), 7)
         self.assertTrue(dialog.reminder_add_button.isEnabled())
         self.assertTrue(dialog.action_add_button.isEnabled())
+        self.assertEqual(dialog.plugin_list.count(), 1)
         self.assertEqual(dialog.focus_minutes.value(), 25)
         self.assertTrue(dialog.focus_start_button.isEnabled())
         self.assertFalse(dialog.check_click.isEnabled())
@@ -62,6 +108,18 @@ class PreferencesSmokeTests(unittest.TestCase):
             list(PreferencesDialog.TAB_NAMES),
         )
         self.assertLessEqual(dialog.height(), 700)
+        dialog.close()
+
+    def test_enabled_plugin_adds_a_settings_page(self) -> None:
+        controller = _StubController()
+        controller.set_plugin_permissions(
+            EXAMPLE_PLUGIN_METADATA.id,
+            [permission.value for permission in EXAMPLE_PLUGIN_METADATA.permissions],
+        )
+        self.assertTrue(controller.set_plugin_enabled(EXAMPLE_PLUGIN_METADATA.id, True))
+        dialog = PreferencesDialog(controller)
+        labels = [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())]
+        self.assertIn("Example Routine", labels)
         dialog.close()
 
     def test_reminder_editor_parses_local_schedule(self) -> None:

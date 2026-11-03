@@ -135,9 +135,11 @@ class ActionRegistry:
         builtin = self.builtins.get(action_id)
         if builtin is not None:
             try:
-                builtin()
+                outcome = builtin()
             except Exception as exc:  # noqa: BLE001 - boundary reports failure
                 return ActionResult(False, f"Built-in action failed: {exc}")
+            if outcome is False:
+                return ActionResult(False, f"Built-in action failed: {action_id}")
             return ActionResult(True, f"Ran built-in action: {action_id}")
 
         action = self.definitions.get(action_id)
@@ -156,8 +158,7 @@ class ActionRegistry:
                 callback = self.builtins.get(_safe_id(action.target))
                 if callback is None:
                     return ActionResult(False, f"Unknown built-in: {action.target}")
-                callback()
-                ok = True
+                ok = callback() is not False
             elif action.type is ActionType.URL:
                 ok = bool(self.open_url(action.target))
             elif action.type is ActionType.APPLICATION:

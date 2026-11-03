@@ -15,6 +15,10 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from desktop_buddy.actions import ActionDefinition, ActionRegistry, ActionType  # noqa: E402
 from desktop_buddy.app import Controller, LocalCommandServer, build_parser  # noqa: E402
+from desktop_buddy.builtin_plugins import (  # noqa: E402
+    EXAMPLE_PLUGIN_METADATA,
+    ExampleRoutinePlugin,
+)
 from desktop_buddy.config import Config  # noqa: E402
 from desktop_buddy.focus import (  # noqa: E402
     FocusEngine,
@@ -26,6 +30,11 @@ from desktop_buddy.platforms.base import (  # noqa: E402
     ActiveWindowProbe,
     Capability,
     WindowInfo,
+)
+from desktop_buddy.plugins import (  # noqa: E402
+    PluginHost,
+    PluginManager,
+    PluginStatus,
 )
 from desktop_buddy.wellness import HistoryStatus, WellnessEngine  # noqa: E402
 
@@ -88,6 +97,7 @@ class _FocusControllerHarness:
     focus_stop = Controller.focus_stop
     focus_summary = Controller.focus_summary
     handle_command = Controller.handle_command
+    _emit_plugin_event = Controller._emit_plugin_event
 
     def __init__(self) -> None:
         self.config = Config()
@@ -123,6 +133,7 @@ class _ReminderControllerHarness:
     snooze_reminder = Controller.snooze_reminder
     actions_summary = Controller.actions_summary
     run_action = Controller.run_action
+    _emit_plugin_event = Controller._emit_plugin_event
     _unique_config_id = staticmethod(Controller._unique_config_id)
 
     def __init__(self) -> None:
@@ -161,6 +172,41 @@ class _ReminderControllerHarness:
         self._wellness = WellnessEngine(self.config, self._wellness.state)
 
     def _schedule_save(self) -> None:
+        return None
+
+
+class _PluginControllerHarness:
+    handle_command = Controller.handle_command
+    plugins_summary = Controller.plugins_summary
+    plugin_info = Controller.plugin_info
+    set_plugin_permissions = Controller.set_plugin_permissions
+    set_plugin_enabled = Controller.set_plugin_enabled
+
+    def __init__(self) -> None:
+        self.config = Config()
+        self.tray = _RefreshTarget()
+
+        def cleanup() -> None:
+            return None
+
+        host = PluginHost(
+            lambda *_args: cleanup,
+            lambda *_args: cleanup,
+            lambda *_args: cleanup,
+            lambda *_args: cleanup,
+        )
+        self._plugins = PluginManager(
+            app_version="1.6.0",
+            config_state=self.config.plugins,
+            available_capabilities=set(),
+            host=host,
+        )
+        self._plugins.register_builtin(EXAMPLE_PLUGIN_METADATA, ExampleRoutinePlugin)
+
+    def _rebuild_wellness(self) -> None:
+        return None
+
+    def _rebuild_actions(self) -> None:
         return None
 
 
@@ -230,6 +276,14 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(reminder.schedule, "weekdays at 9")
         action = self.parser.parse_args(["actions", "run", "dance"])
         self.assertEqual((action.action, action.action_id), ("run", "dance"))
+
+    def test_plugin_commands_parse(self) -> None:
+        args = self.parser.parse_args(
+            ["plugins", "enable", "example-routine", "actions", "events"]
+        )
+        self.assertEqual(args.action, "enable")
+        self.assertEqual(args.plugin_id, "example-routine")
+        self.assertEqual(args.permissions, ["actions", "events"])
 
     def test_global_flags_parse(self) -> None:
         args = self.parser.parse_args(["--diagnose", "--reset-config", "-v"])
@@ -348,6 +402,29 @@ class ReminderControllerTests(unittest.TestCase):
         reply = harness.handle_command("actions run unsafe")
         self.assertIn("not approved", reply)
         self.assertEqual(calls, [])
+
+
+class PluginControllerTests(unittest.TestCase):
+    def test_plugins_are_permissioned_through_ipc(self) -> None:
+        harness = _PluginControllerHarness()
+        blocked = harness.handle_command("plugins enable example-routine")
+        self.assertIn("Status: blocked", blocked)
+        self.assertEqual(
+            harness._plugins.records["example-routine"].status,
+            PluginStatus.BLOCKED,
+        )
+        reply = harness.handle_command(
+            "plugins enable example-routine actions reminders tray settings events"
+        )
+        self.assertEqual(reply, "plugin enabled: example-routine")
+        self.assertIn("Example Routine", harness.handle_command("plugins list"))
+        self.assertIn(
+            "Status: active", harness.handle_command("plugins info example-routine")
+        )
+        self.assertEqual(
+            harness.handle_command("plugins disable example-routine"),
+            "plugin disabled: example-routine",
+        )
 
 
 class LocalIpcTests(unittest.TestCase):

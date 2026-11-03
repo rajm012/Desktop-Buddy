@@ -38,6 +38,13 @@ from .focus import (
 )
 from .platforms import get_backend
 from .platforms.base import Capability, PlatformBackend
+from .plugins import (
+    PLUGIN_API_VERSION,
+    PluginHost,
+    PluginManager,
+    PluginPermission,
+    PluginStatus,
+)
 from .prefs import OnboardingDialog, PreferencesDialog
 from .sound import chime_path
 from .toast import ReminderToast
@@ -197,6 +204,12 @@ class Controller(QObject):
         self._state_dir = self.backend.paths().state_dir
         self._wellness_path = self._state_dir / "reminders.json"
         self._focus_path = self._state_dir / "focus.json"
+        self._plugin_actions: dict[str, tuple[str, Callable[[], object]]] = {}
+        self._plugin_reminders: dict[str, dict[str, object]] = {}
+        self._plugin_tray_items: dict[str, tuple[str, str, Callable[[], object]]] = {}
+        self._plugin_settings_pages: dict[
+            str, tuple[str, str, Callable[..., object]]
+        ] = {}
         self._wellness = self._build_wellness()
         self._focus = FocusEngine(
             FocusSettings.from_config(self.config),
@@ -214,6 +227,12 @@ class Controller(QObject):
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self.save_config)
+        self._plugins = self._build_plugins()
+        self._plugins.events.emit(
+            "system.capabilities",
+            {"available": sorted(self._plugins.available_capabilities)},
+        )
+        self._plugins.events.emit("app.started", {"version": __version__})
         self._toast: ReminderToast | None = None
         self._toast_queue: list[tuple[Reminder, str]] = []
         self._reminder_timer = QTimer(self)
@@ -263,6 +282,7 @@ class Controller(QObject):
                 log.warning("Could not restore autostart setting: %s", exc)
         self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
+        getattr(self, "_reload_plugins", lambda: None)()
         self._rebuild_wellness()
         self._rebuild_focus()
         getattr(self, "_rebuild_actions", lambda: None)()
@@ -278,11 +298,205 @@ class Controller(QObject):
                 log.warning("Could not reset autostart setting: %s", exc)
         self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
+        getattr(self, "_reload_plugins", lambda: None)()
         self._rebuild_wellness()
         self._rebuild_focus()
         getattr(self, "_rebuild_actions", lambda: None)()
         self.tray.refresh()
         self._schedule_save()
+
+    # ---------------------------------------------------------------- plugins
+    def _build_plugins(self) -> PluginManager:
+        from .builtin_plugins import BUILTIN_PLUGINS
+
+        available = {
+            capability.value
+            for capability, info in self.backend.capabilities().items()
+            if info.available
+        }
+        host = PluginHost(
+            register_action=self._register_plugin_action,
+            register_reminder=self._register_plugin_reminder,
+            register_tray_item=self._register_plugin_tray_item,
+            register_settings_page=self._register_plugin_settings_page,
+        )
+        manager = PluginManager(
+            app_version=__version__,
+            config_state=self.config.plugins,
+            available_capabilities=available,
+            host=host,
+            state_changed=self._plugin_state_changed,
+            logger=log,
+        )
+        for metadata, factory in BUILTIN_PLUGINS:
+            manager.register_builtin(metadata, factory)
+        manager.discover_external([self.backend.paths().config_dir / "plugins"])
+        manager.load_enabled()
+        return manager
+
+    def _reload_plugins(self) -> None:
+        old = getattr(self, "_plugins", None)
+        if old is not None:
+            old.unload()
+        self._plugin_actions.clear()
+        self._plugin_reminders.clear()
+        self._plugin_tray_items.clear()
+        self._plugin_settings_pages.clear()
+        self._plugins = self._build_plugins()
+        self._plugins.events.emit("app.started", {"version": __version__})
+
+    def _plugin_state_changed(self) -> None:
+        self._schedule_save()
+        if hasattr(self, "tray"):
+            self.tray.refresh()
+        prefs = getattr(self, "_prefs", None)
+        if prefs is not None and hasattr(prefs, "refresh_plugins"):
+            prefs.refresh_plugins()
+
+    def _register_plugin_action(
+        self,
+        _plugin_id: str,
+        action_id: str,
+        name: str,
+        callback: Callable[[], object],
+    ) -> Callable[[], None]:
+        if action_id in self._plugin_actions:
+            raise ValueError(f"Duplicate plugin action: {action_id}")
+        self._plugin_actions[action_id] = (name, callback)
+        if hasattr(self, "_actions"):
+            self._rebuild_actions()
+        if hasattr(self, "tray"):
+            self.tray.refresh()
+
+        def cleanup() -> None:
+            self._plugin_actions.pop(action_id, None)
+            if hasattr(self, "_actions"):
+                self._rebuild_actions()
+            if hasattr(self, "tray"):
+                self.tray.refresh()
+
+        return cleanup
+
+    def _register_plugin_reminder(
+        self, _plugin_id: str, definition: dict[str, object]
+    ) -> Callable[[], None]:
+        reminder = Reminder.from_dict(definition)
+        if reminder is None:
+            raise ValueError("Plugin supplied an invalid reminder definition.")
+        if reminder.id in self._plugin_reminders:
+            raise ValueError(f"Duplicate plugin reminder: {reminder.id}")
+        self._plugin_reminders[reminder.id] = reminder.to_dict()
+        if hasattr(self, "_wellness"):
+            self._rebuild_wellness()
+
+        def cleanup() -> None:
+            self._plugin_reminders.pop(reminder.id, None)
+            if hasattr(self, "_wellness"):
+                self._rebuild_wellness()
+
+        return cleanup
+
+    def _register_plugin_tray_item(
+        self,
+        plugin_id: str,
+        item_id: str,
+        label: str,
+        callback: Callable[[], object],
+    ) -> Callable[[], None]:
+        if item_id in self._plugin_tray_items:
+            raise ValueError(f"Duplicate plugin tray item: {item_id}")
+        self._plugin_tray_items[item_id] = (plugin_id, label, callback)
+        if hasattr(self, "tray"):
+            self.tray.refresh()
+
+        def cleanup() -> None:
+            self._plugin_tray_items.pop(item_id, None)
+            if hasattr(self, "tray"):
+                self.tray.refresh()
+
+        return cleanup
+
+    def _register_plugin_settings_page(
+        self,
+        plugin_id: str,
+        page_id: str,
+        title: str,
+        factory: Callable[..., object],
+    ) -> Callable[[], None]:
+        if page_id in self._plugin_settings_pages:
+            raise ValueError(f"Duplicate plugin settings page: {page_id}")
+        self._plugin_settings_pages[page_id] = (plugin_id, title, factory)
+
+        def cleanup() -> None:
+            self._plugin_settings_pages.pop(page_id, None)
+
+        return cleanup
+
+    def plugin_settings_pages(
+        self,
+    ) -> list[tuple[str, str, str, Callable[..., object]]]:
+        return [
+            (page_id, plugin_id, title, factory)
+            for page_id, (
+                plugin_id,
+                title,
+                factory,
+            ) in self._plugin_settings_pages.items()
+        ]
+
+    def set_plugin_permissions(self, plugin_id: str, values: list[str]) -> bool:
+        permissions: set[PluginPermission] = set()
+        try:
+            permissions = {PluginPermission(value) for value in values}
+        except ValueError:
+            return False
+        return self._plugins.set_permissions(plugin_id, permissions)
+
+    def set_plugin_enabled(
+        self, plugin_id: str, enabled: bool, permissions: list[str] | None = None
+    ) -> bool:
+        if not enabled:
+            changed = self._plugins.disable(plugin_id)
+        else:
+            granted = None
+            if permissions is not None:
+                try:
+                    granted = {PluginPermission(value) for value in permissions}
+                except ValueError:
+                    return False
+            changed = self._plugins.enable(plugin_id, granted)
+        self._rebuild_wellness()
+        self._rebuild_actions()
+        self.tray.refresh()
+        return changed
+
+    def plugins_summary(self) -> str:
+        return self._plugins.summary()
+
+    def plugin_info(self, plugin_id: str) -> str:
+        record = self._plugins.records.get(plugin_id)
+        if record is None:
+            return f"Unknown plugin: {plugin_id}"
+        metadata = record.metadata
+        granted = self._plugins.granted_permissions(plugin_id)
+        requested = ", ".join(item.value for item in metadata.permissions) or "none"
+        granted_text = ", ".join(sorted(item.value for item in granted)) or "none"
+        capabilities = ", ".join(metadata.required_capabilities) or "none"
+        return (
+            f"{metadata.name} {metadata.version} ({metadata.id})\n"
+            f"Status: {record.status.value}\n"
+            f"Origin: {'built-in' if metadata.builtin else record.source}\n"
+            f"Permissions requested: {requested}\n"
+            f"Permissions granted: {granted_text}\n"
+            f"Required capabilities: {capabilities}\n"
+            f"{metadata.description}"
+            + (f"\nError: {record.error}" if record.error else "")
+        )
+
+    def _emit_plugin_event(self, event_name: str, **payload: object) -> None:
+        manager = getattr(self, "_plugins", None)
+        if manager is not None:
+            manager.events.emit(event_name, payload)
 
     # --------------------------------------------------------------- settings
     def set_paused(self, paused: bool) -> None:
@@ -415,6 +629,15 @@ class Controller(QObject):
             self.window.say("I'll keep an eye on your windows!", 3.0)
 
     # -------------------------------------------------------------- reminders
+    def _wellness_config(self) -> Config:
+        if not self._plugin_reminders:
+            return self.config
+        combined = self.config.copy()
+        combined.reminders.extend(
+            dict(definition) for definition in self._plugin_reminders.values()
+        )
+        return combined
+
     def _build_wellness(self) -> WellnessEngine:
         state = ReminderState()
         try:
@@ -424,10 +647,12 @@ class Controller(QObject):
                 )
         except (OSError, ValueError):
             state = ReminderState()
-        return WellnessEngine(self.config, state, self._rng)
+        return WellnessEngine(self._wellness_config(), state, self._rng)
 
     def _rebuild_wellness(self) -> None:
-        self._wellness = WellnessEngine(self.config, self._wellness.state, self._rng)
+        self._wellness = WellnessEngine(
+            self._wellness_config(), self._wellness.state, self._rng
+        )
 
     def _save_wellness(self) -> None:
         try:
@@ -471,6 +696,9 @@ class Controller(QObject):
         ):
             self.backend.play_audio(chime_path(reminder.kind, self._state_dir))
         self._queue_toast(reminder, message)
+        self._emit_plugin_event(
+            "reminder.triggered", reminder_id=reminder.id, manual=manual
+        )
         if manual:
             log.info("Manual reminder: %s", reminder.id)
 
@@ -525,16 +753,21 @@ class Controller(QObject):
             )
         else:
             self.window.say("Noted! ✅", 3.0)
+        self._emit_plugin_event("reminder.done", reminder_id=reminder.id)
 
     def _toast_snooze(self, reminder: Reminder) -> None:
         minutes = self.config.snooze_minutes or reminder.snooze_minutes
         self._wellness.snooze(reminder, minutes)
         self._save_wellness()
         self.window.say(f"Snoozed {minutes} min 😴", 3.0)
+        self._emit_plugin_event(
+            "reminder.snoozed", reminder_id=reminder.id, minutes=minutes
+        )
 
     def _toast_dismiss(self, reminder: Reminder) -> None:
         self._wellness.mark_missed(reminder)
         self._save_wellness()
+        self._emit_plugin_event("reminder.missed", reminder_id=reminder.id)
 
     def reminders_summary(self, count: int = 6) -> str:
         if not self.config.reminders_enabled:
@@ -729,6 +962,10 @@ class Controller(QObject):
         return True
 
     def _build_actions(self) -> ActionRegistry:
+        plugin_builtins = {
+            action_id: callback
+            for action_id, (_name, callback) in self._plugin_actions.items()
+        }
         return ActionRegistry.from_config(
             self.config.actions,
             builtins={
@@ -737,6 +974,7 @@ class Controller(QObject):
                 "open-settings": self.open_settings,
                 "start-focus": self.focus_start,
                 "stop-focus": self.focus_stop,
+                **plugin_builtins,
             },
             open_url=lambda target: QDesktopServices.openUrl(QUrl(target)),
             launch_application=self._spawn_process,
@@ -799,11 +1037,18 @@ class Controller(QObject):
         result = self._actions.execute(action_id)
         if announce:
             self.window.say(result.message, 4.0)
+        self._emit_plugin_event(
+            "action.executed", action_id=action_id, ok=result.ok, message=result.message
+        )
         return result
 
     def actions_summary(self) -> str:
         builtins = ("dance", "show-buddy", "open-settings", "start-focus", "stop-focus")
         lines = [f"{action_id}  builtin" for action_id in builtins]
+        lines.extend(
+            f"{action_id}  plugin  {name}"
+            for action_id, (name, _callback) in sorted(self._plugin_actions.items())
+        )
         lines.extend(
             f"{action.id}  {action.type.value}  {action.name}"
             for action in self._actions.list_actions()
@@ -859,6 +1104,11 @@ class Controller(QObject):
         self._sync_focus_ui()
         label = kind_label(self._focus.state.kind)
         self.window.focus_started(self._focus.state.kind, f"{label} started")
+        self._emit_plugin_event(
+            "focus.changed",
+            status=self._focus.state.status.value,
+            kind=self._focus.state.kind.value,
+        )
         return True
 
     def focus_pause(self) -> bool:
@@ -867,6 +1117,11 @@ class Controller(QObject):
             self._save_focus()
             self._sync_focus_ui()
             self.window.say("Focus timer paused", 3.0)
+            self._emit_plugin_event(
+                "focus.changed",
+                status=self._focus.state.status.value,
+                kind=self._focus.state.kind.value,
+            )
         return changed
 
     def focus_resume(self) -> bool:
@@ -875,6 +1130,11 @@ class Controller(QObject):
             self._save_focus()
             self._sync_focus_ui()
             self.window.say("Back to it!", 3.0)
+            self._emit_plugin_event(
+                "focus.changed",
+                status=self._focus.state.status.value,
+                kind=self._focus.state.kind.value,
+            )
         return changed
 
     def focus_skip(self) -> bool:
@@ -884,6 +1144,11 @@ class Controller(QObject):
         self._save_focus()
         self._sync_focus_ui()
         self.window.say(f"Next: {kind_label(event.next_kind)}", 3.0)
+        self._emit_plugin_event(
+            "focus.changed",
+            status=self._focus.state.status.value,
+            kind=self._focus.state.kind.value,
+        )
         return True
 
     def focus_stop(self) -> bool:
@@ -892,6 +1157,11 @@ class Controller(QObject):
             self._save_focus()
             self._sync_focus_ui()
             self.window.say("Focus cycle stopped", 3.0)
+            self._emit_plugin_event(
+                "focus.changed",
+                status=self._focus.state.status.value,
+                kind=self._focus.state.kind.value,
+            )
         return changed
 
     def _check_focus(self) -> None:
@@ -912,6 +1182,12 @@ class Controller(QObject):
     def _handle_focus_event(self, event: FocusEvent) -> None:
         if event.type is not FocusEventType.COMPLETED:
             return
+        self._emit_plugin_event(
+            "focus.completed",
+            kind=event.kind.value,
+            next_kind=event.next_kind.value,
+            at=event.at.isoformat(),
+        )
         if event.kind is SessionKind.FOCUS:
             message = f"Focus complete — next: {kind_label(event.next_kind)}"
             sound_kind = "break"
@@ -1050,6 +1326,9 @@ class Controller(QObject):
         )
 
     def quit(self, *_args: object) -> None:
+        manager = getattr(self, "_plugins", None)
+        if manager is not None:
+            manager.shutdown()
         self.save_config()
         self._save_wellness()
         self._save_focus()
@@ -1143,6 +1422,30 @@ class Controller(QObject):
             if parts[1] == "run" and len(parts) >= 3:
                 return self.run_action(parts[2], announce=False).message
             return "usage: actions list|run ID"
+        elif verb == "plugins" and len(parts) > 1:
+            action = parts[1]
+            if action == "list":
+                return self.plugins_summary()
+            if action == "info" and len(parts) >= 3:
+                return self.plugin_info(parts[2])
+            if action == "grant" and len(parts) >= 3:
+                return (
+                    f"plugin permissions updated: {parts[2]}"
+                    if self.set_plugin_permissions(parts[2], parts[3:])
+                    else f"could not update plugin permissions: {parts[2]}"
+                )
+            if action == "enable" and len(parts) >= 3:
+                permissions = parts[3:] or None
+                if self.set_plugin_enabled(parts[2], True, permissions):
+                    return f"plugin enabled: {parts[2]}"
+                return self.plugin_info(parts[2])
+            if action == "disable" and len(parts) >= 3:
+                return (
+                    f"plugin disabled: {parts[2]}"
+                    if self.set_plugin_enabled(parts[2], False)
+                    else f"unknown plugin: {parts[2]}"
+                )
+            return "usage: plugins list|info ID|enable ID [PERMISSIONS...]|disable ID|grant ID [PERMISSIONS...]"
         elif verb == "focus" and len(parts) > 1:
             action = parts[1]
             if action == "status":
@@ -1202,6 +1505,7 @@ class Controller(QObject):
             f"species={self.config.species} visible={self.window.isVisible()} "
             f"paused={self.window.is_paused}"
             f" focus={self._focus.state.status.value}:{self._focus.state.kind.value}"
+            f" plugins={sum(record.status is PluginStatus.ACTIVE for record in self._plugins.records.values())}"
         )
 
     def _greet(self) -> None:
@@ -1234,6 +1538,8 @@ def diagnose() -> int:
         line(f"cap:{capability.value}", value)
     line("config", CONFIG_PATH)
     line("log", LOG_PATH)
+    line("plugin API", PLUGIN_API_VERSION)
+    line("plugin directory", backend.paths().config_dir / "plugins")
     try:
         app = QApplication([sys.argv[0]])
     except Exception as exc:  # noqa: BLE001
@@ -1308,6 +1614,16 @@ def build_parser() -> argparse.ArgumentParser:
     actions = sub.add_parser("actions", help="list or run quick actions")
     actions.add_argument("action", choices=("list", "run"))
     actions.add_argument("action_id", nargs="?")
+    plugins = sub.add_parser("plugins", help="manage optional plugins")
+    plugins.add_argument(
+        "action", choices=("list", "info", "enable", "disable", "grant")
+    )
+    plugins.add_argument("plugin_id", nargs="?")
+    plugins.add_argument(
+        "permissions",
+        nargs="*",
+        choices=tuple(permission.value for permission in PluginPermission),
+    )
     focus = sub.add_parser("focus", help="control the focus timer")
     focus.add_argument(
         "action", choices=("start", "pause", "resume", "skip", "stop", "status")
@@ -1403,6 +1719,29 @@ def main(argv: list[str] | None = None) -> int:
                         ("Unknown", "Command action", "Action failed", "Could not")
                     )
                     else 1
+                )
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
+        if args.command == "plugins":
+            if args.action != "list" and not args.plugin_id:
+                parser.error(f"plugins {args.action} requires a plugin ID")
+            command = f"plugins {args.action}"
+            if args.plugin_id:
+                command += f" {shlex.quote(args.plugin_id)}"
+            if args.permissions:
+                command += " " + " ".join(
+                    shlex.quote(permission) for permission in args.permissions
+                )
+            reply = request_reply(command)
+            if reply:
+                print(reply)
+                return (
+                    1
+                    if reply.startswith(("Unknown", "unknown", "could not"))
+                    or "Status: blocked" in reply
+                    or "Status: incompatible" in reply
+                    or "Status: failed" in reply
+                    else 0
                 )
             print("Desktop Buddy is not running.", file=sys.stderr)
             return 1

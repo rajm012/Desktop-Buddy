@@ -261,7 +261,10 @@ class Reminder:
         except (TypeError, ValueError):
             snooze = 10
         message = str(data.get("message") or f"{title}!").strip()[:500]
-        action_id = _stable_id(data.get("action_id")) or None
+        raw_action_id = data.get("action_id")
+        action_id = (
+            _stable_id(raw_action_id) if isinstance(raw_action_id, str) else None
+        ) or None
         return cls(
             id=reminder_id,
             kind=str(data.get("kind", "custom")).strip()[:32] or "custom",

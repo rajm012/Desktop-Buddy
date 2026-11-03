@@ -6,7 +6,7 @@ This file is the operational handbook for coding agents working in this reposito
 
 Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local custom reminders, safe quick actions, a focus timer, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
 
-Current package version: `1.5.0`.
+Current package version: `1.6.0`.
 
 Primary supported environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows and macOS currently use the generic backend and are roadmap work, not supported native implementations.
 
@@ -32,7 +32,8 @@ Repository state at handoff:
 - Phase 2 is complete: tabbed preferences, onboarding, capability status, attention controls, config import/export/reset, and animation previews.
 - Phase 3 is complete: pure focus state machine, configurable focus/break durations, tray/CLI/IPC actions, restoration, daily history, character feedback, and attention suppression.
 - Phase 4 is complete: general reminders, local schedule parsing, outcome history, safe quick actions, explicit command approval, Preferences/tray integration, and CLI/IPC controls.
-- Phases 5 through 11 have not started.
+- Phase 5 is complete: plugin API 1, event bus, limited contribution APIs, built-in/external discovery, permissions, failure isolation, and management UI/CLI.
+- Phases 6 through 11 have not started.
 
 Important history note: commit `6f057a3` is titled `phase-3`, but its actual changes completed Phase 2. The focus timer was implemented in the working tree after that commit; use current code and tests rather than the old commit name.
 
@@ -40,10 +41,10 @@ Verification at handoff:
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
-- Unit/smoke tests: 121 passing.
+- Unit/smoke tests: 137 passing.
 - Source distribution and wheel build: passing.
 
-The next roadmap task is Phase 5, Step 1: define plugin metadata, lifecycle, and compatibility version fields. Read the Phase 4 reference below before extracting reminder/action extension points.
+The next roadmap task is Phase 6, Step 1: add reliable idle-time and fullscreen detection to each desktop backend. Read the Phase 5 reference below before implementing integrations; system features should publish events through the plugin boundary where appropriate.
 
 ## 3. Repository map
 
@@ -76,6 +77,8 @@ The next roadmap task is Phase 5, Step 1: define plugin metadata, lifecycle, and
 | `desktop_buddy/config.py` | Config dataclass, validation, migration, atomic JSON persistence, themes/species. |
 | `desktop_buddy/wellness.py` | Pure general reminder model, recurrence, local phrase parsing, scheduling, snooze, and outcome history. |
 | `desktop_buddy/actions.py` | Pure validation and permission-aware registry for built-in, application, URL, and command actions. |
+| `desktop_buddy/plugins.py` | Pure plugin metadata, compatibility, event bus, permissions, lifecycle, failure isolation, and external discovery. |
+| `desktop_buddy/builtin_plugins.py` | Optional built-ins implemented through the same limited API as external plugins. |
 | `desktop_buddy/focus.py` | Pure focus/break state machine, versioned state, restoration, and daily history. |
 | `desktop_buddy/toast.py` | Reminder card with Done and Snooze actions. |
 | `desktop_buddy/sound.py` | Generated WAV reminder chimes. |
@@ -96,6 +99,7 @@ The next roadmap task is Phase 5, Step 1: define plugin metadata, lifecycle, and
 | `tests/test_wellness.py` | General recurrence, phrase parsing, quiet hours, outcomes, and persisted state. |
 | `tests/test_focus.py` | Focus transitions, deadline accuracy, restoration, cadence, history, corrupt state. |
 | `tests/test_actions.py` | Action target validation, exact argv execution, built-ins, and command approval enforcement. |
+| `tests/test_plugins.py` | Metadata, compatibility, permissions, capabilities, discovery, cleanup, example integration, and failure isolation. |
 | `tests/test_app_cli_ipc.py` | CLI parsing, local socket IPC, config transactions, reminder outcomes, and action safety. |
 | `tests/test_platform_backend.py` | Paths, capabilities, Linux services, architecture isolation. |
 | `tests/test_prefs_smoke.py` | Preferences/onboarding construction, cancellation, capability messaging. |
@@ -115,13 +119,14 @@ The normal application path is:
 2. Control commands attempt to contact the running process through a `QLocalSocket`.
 3. If no control command is being sent and no instance is active, `main()` creates `QApplication`, loads `Config`, and constructs `Controller`.
 4. `Controller` owns the buddy window, tray, preferences, reminder/focus
-   engines, action registry, toast queue, save timers, and local IPC server.
+   engines, action registry, plugin host contributions, toast queue, save timers,
+   and local IPC server.
 5. `BuddyWindow` owns the `Brain` behavior state and renders the selected character and particle effects.
 6. Pure domain modules calculate state; Qt/UI modules schedule work and display the results; the backend performs supported OS operations.
 
 Maintain these boundaries:
 
-- `behavior.py`, `wellness.py`, `focus.py`, and `actions.py` should remain deterministic, headless, and unit-testable.
+- `behavior.py`, `wellness.py`, `focus.py`, `actions.py`, and `plugins.py` should remain deterministic, headless, and unit-testable.
 - `app.py` coordinates services but should not become the home for domain rules.
 - `window.py`, `prefs.py`, `tray.py`, and `toast.py` are Qt presentation layers.
 - Native calls, platform paths, autostart details, active-window inspection, and platform capability decisions belong under `desktop_buddy/platforms/`.
@@ -143,7 +148,7 @@ Do not hard-code these paths in application logic. Always use backend paths.
 Config rules:
 
 - `Config` is a dataclass in `config.py`.
-- Current config schema version is `4`.
+- Current config schema version is `5`.
 - `Config.save()` writes a temporary file and atomically replaces the target.
 - Unknown JSON keys are ignored when loading.
 - Values are normalized and clamped after migration.
@@ -188,7 +193,7 @@ Do not assume X11 merely because the OS is Linux. Wayland limitations are an exp
 - Keep dialogs usable on common laptop screens.
 - Preserve high-DPI behavior; the renderer and geometry operate in logical pixels and Qt handles device scaling.
 
-The Reminders tab edits general schedules and displays outcome history. The Integrations tab edits quick actions and owns the explicit command warning/approval flow. The Focus tab provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep these controls synchronized with tray and CLI behavior.
+The Reminders tab edits general schedules and displays outcome history. The Integrations tab edits quick actions, owns command approval, and manages plugin permissions/enablement. Enabled plugins may add settings tabs. The Focus tab provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep these controls synchronized with tray and CLI behavior.
 
 ## 8. Development commands
 
@@ -357,9 +362,56 @@ Phase 4 is complete. Preserve these security and scheduling guarantees when addi
 - `tests/test_app_cli_ipc.py` covers parser/IPC management, pre-display trigger state, done/missed controller outcomes, and command denial through IPC.
 - `tests/test_prefs_smoke.py` covers the new list controls, schedule editor, command-approval reset, transactions, and capability messaging.
 
-All eight Phase 4 steps and acceptance criteria are checked in `ROADMAP.md`. The next handoff is Phase 5: plugin metadata and lifecycle. Plugins must not weaken the action approval boundary or move reminder scheduling into Qt/plugin UI code.
+All eight Phase 4 steps and acceptance criteria are checked in `ROADMAP.md`. Phase 5 builds on these boundaries; plugins must not weaken action approval or move reminder scheduling into Qt/plugin UI code.
 
-## 12. Known constraints and common pitfalls
+## 12. Phase 5 implementation reference
+
+Phase 5 is complete. Plugin API 1 is the stable extension boundary for later optional integrations.
+
+### Metadata, compatibility, and discovery
+
+- `desktop_buddy/plugins.py` is headless and owns `PluginMetadata`, `PluginManager`, `PluginContext`, `EventBus`, permission/status enums, and external loading.
+- Plugin API version is `1`. Metadata declares plugin version, minimum/maximum app versions, requested permissions, required platform capabilities, and `file.py:ClassName` entrypoint.
+- Built-ins are registered first. External manifests are then discovered below `PlatformBackend.paths().config_dir / "plugins"`.
+- Discovery reads only `plugin.json`; external Python is not imported until the plugin is explicitly enabled.
+- Duplicate IDs cannot replace built-ins. Entrypoints must resolve to Python files inside their plugin directory.
+
+### Permissions and limited host APIs
+
+- Config schema 5 stores per-plugin `enabled` state and granted permission names under `plugins`.
+- Permissions are `actions`, `reminders`, `tray`, `settings`, and `events`. All declared permissions must be explicitly granted before activation.
+- Plugins may also require platform capability values such as `audio`, `active_window`, or `battery`; activation is blocked when unavailable.
+- Contributions are automatically namespaced with the plugin ID and removed on disable/failure/reload.
+- Plugin reminders are merged into a copied wellness config only while active; plugins do not mutate the persisted user reminder list.
+- Settings factories receive only a parent widget and must return `QWidget` instances. The controller is not a plugin API. Keep domain work outside settings-page Qt callbacks.
+
+### Lifecycle and failure isolation
+
+- Plugins implement `activate(context)` and `deactivate()`.
+- Activation, event, action/tray callback, settings factory, and cleanup boundaries catch plugin exceptions.
+- A faulty plugin is marked failed, persisted disabled, unsubscribed, cleaned up, and logged. The exception does not close the application or disable healthy plugins.
+- External Python plugins are not sandboxed from the operating system. UI/docs must continue to warn users to enable only trusted source; API permissions are not an OS security boundary.
+- Normal application shutdown preserves enabled state while deactivating active instances.
+
+### Events and integrations
+
+- Stable core events include app start/stop, system capabilities, action execution, reminder outcomes, and focus changes/completion.
+- Delivery is synchronous on the application thread. Plugins must keep handlers short.
+- `desktop_buddy/builtin_plugins.py` contains the disabled-by-default Example Routine plugin. It exercises every contribution API through the same context external plugins receive.
+- Preferences exposes plugin status, errors, permission grants, and enable/disable controls. Enabled settings pages appear as extra tabs when Preferences opens.
+- Tray → Plugins contains contributed items. CLI/IPC exposes `plugins list`, `info`, `grant`, `enable`, and `disable`.
+- `docs/PLUGIN_API.md` is the external author guide and minimal example.
+
+### Phase 5 test coverage
+
+- `tests/test_plugins.py` covers parsing, compatibility, capability/permission blocking, delayed external import, activation/event failure isolation, disabled-core operation, example contributions, and cleanup.
+- `tests/test_app_cli_ipc.py` covers plugin parser and permissioned IPC management.
+- `tests/test_prefs_smoke.py` covers plugin controls and contributed settings pages.
+- `tests/test_config.py` covers schema-5 migration, normalization, and deep-copy transactions.
+
+All eight Phase 5 steps and acceptance criteria are checked in `ROADMAP.md`. The next handoff is Phase 6: context awareness and system integrations. Prefer publishing new system state as events and implementing optional consumers as plugins.
+
+## 13. Known constraints and common pitfalls
 
 - Linux/X11 is the only full desktop backend today.
 - Wayland cannot reliably support arbitrary positioning, click-through, global window inspection, or forced always-on-top using standard Qt alone.
@@ -370,11 +422,13 @@ All eight Phase 4 steps and acceptance criteria are checked in `ROADMAP.md`. The
 - `Controller._status_text()` reads selected private window fields for diagnostics. Do not copy this pattern into feature logic.
 - Build output directories (`build/`, `dist/`, `*.egg-info`) are generated artifacts, not feature source.
 - Do not use character names as stable IDs. Use species keys such as `robot`, `ghost`, and `mochi`.
-- Do not put native platform code into `behavior.py`, `wellness.py`, `focus.py`, or `actions.py`.
+- Do not put native platform code into `behavior.py`, `wellness.py`, `focus.py`, `actions.py`, or `plugins.py`.
 - Never execute a configured command through a shell, infer command approval, or retain approval after its target changes.
 - Do not mark a reminder done when it is merely displayed; user outcome callbacks own terminal history.
+- Do not describe plugin permissions as a Python/OS sandbox; external plugins execute with the user's account.
+- Do not import external plugin modules during discovery or allow entrypoints outside their plugin directory.
 
-## 13. Agent workflow
+## 14. Agent workflow
 
 For every task:
 
@@ -396,7 +450,7 @@ Avoid:
 - Destructive Git operations or overwriting unrelated work.
 - Checking a roadmap box merely because scaffolding or placeholder UI exists.
 
-## 14. Sources of truth
+## 15. Sources of truth
 
 When documents disagree, use this order:
 

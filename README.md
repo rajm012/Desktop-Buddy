@@ -38,6 +38,7 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
   in local history, and non-urgent reminders respect active hours
 - **Quick actions**: attach safe built-ins, application launches, URLs, or an
   explicitly approved command to a reminder; command execution never uses a shell
+- **Permissioned plugins**: optional built-in and external plugins can add namespaced actions, reminders, tray items, settings pages, and event handlers; faulty plugins are disabled without taking down the buddy
 - **Focus timer**: configurable focus, short-break and long-break sessions with start, pause, resume, skip and stop controls in Preferences, the tray and CLI
 - Active or paused focus sessions survive restarts; completed focus sessions are
   recorded locally with a compact seven-day history and daily totals
@@ -46,8 +47,7 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Eyes follow the cursor; the buddy chases it when playful
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
-- Six-tab preferences dialog with theme and animation-state previews, platform
-  capability status, and import/export/reset controls
+- Six core Preferences tabs with theme/animation previews, platform capability status, import/export/reset controls, and optional plugin-provided tabs
 - First-run onboarding for character, size, reminder hours and login startup
 - Reduced motion, silent mode and do-not-disturb attention controls
 - 7 colour themes, adjustable size / speed / frame rate / sleep timeout
@@ -97,6 +97,7 @@ Then:
 | Change character | Tray → Character → Bolt / Boo-ombastic / Mochi |
 | Reminders | Preferences → Reminders, tray → Reminders, or the reminder CLI |
 | Quick actions | Preferences → Integrations or tray → Quick actions |
+| Plugins | Preferences → Integrations → Plugins or `desktop-buddy plugins list` |
 | Focus timer | Tray → Focus, Preferences → Focus, or `desktop-buddy focus start` |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
@@ -115,6 +116,10 @@ desktop-buddy reminders snooze REMINDER_ID [MINUTES]
 desktop-buddy remind REMINDER_ID         # fire any configured reminder now
 desktop-buddy actions list
 desktop-buddy actions run ACTION_ID
+desktop-buddy plugins list|info PLUGIN_ID
+desktop-buddy plugins grant PLUGIN_ID actions events
+desktop-buddy plugins enable PLUGIN_ID [PERMISSIONS...]
+desktop-buddy plugins disable PLUGIN_ID
 desktop-buddy focus start [focus|short-break|long-break]
 desktop-buddy focus pause|resume|skip|stop|status
 desktop-buddy click-through on|off     # let clicks pass through to apps below
@@ -134,7 +139,7 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `schema_version` | `4` | Persisted-format version used for automatic upgrades |
+| `schema_version` | `5` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
@@ -156,6 +161,7 @@ but hand-editable too):
 | `reminder_sound` | `true` | Play a gentle generated chime |
 | `reminders` | built-in wellness set | General reminder definitions, schedules, urgency, snooze length, and attached action IDs |
 | `actions` | `[]` | Built-in, application, URL, and approved-command quick actions |
+| `plugins` | `{}` | Per-plugin enabled state and explicitly granted permissions |
 | `active_start` / `active_end` | `"09:00"` / `"22:30"` | Window in which non-urgent reminders may interrupt |
 | `reminder_grace_minutes` | `45` | How late a missed scheduled reminder may still fire |
 | `snooze_minutes` | `10` | Default snooze length on the reminder card |
@@ -174,6 +180,8 @@ restores running or paused sessions after restart.
 Reminder runtime state and up to 500 done/missed/snoozed history entries are
 stored in `~/.local/state/desktop-buddy/reminders.json`. Reminder and focus times
 use deterministic local wall-clock values and require no network service.
+
+External plugins are discovered under `~/.config/desktop-buddy/plugins/<plugin-id>/`. Their manifests are read at startup, but Python code is imported only after explicit permission grants and enablement. Permissions constrain Desktop Buddy APIs, not the operating system; review external source before enabling it. See [the plugin API guide](docs/PLUGIN_API.md).
 
 ## Performance
 
@@ -273,6 +281,8 @@ desktop_buddy/
   wellness.py       general reminder schedules, parsing and history (pure)
   focus.py          focus/break state machine, persistence and history (pure)
   actions.py        validated, permission-aware quick action registry (pure)
+  plugins.py        metadata, event bus, permissions, discovery and lifecycle
+  builtin_plugins.py optional built-ins using the public plugin context
   toast.py          reminder card with Done/Snooze next to the buddy
   sound.py          generated chime waveforms (played through the backend)
   prefs.py          preferences dialog + live preview
@@ -294,13 +304,19 @@ tools/preview.py    renders a pose/theme sheet to PNG
 ./run.sh --diagnose
 ```
 
-The behaviour, wellness, focus, and action engines have no Qt dependency, so
-their state machines and policies can be tested headlessly.
+The behaviour, wellness, focus, action, and plugin engines have no Qt dependency, so their state machines and policies can be tested headlessly.
 
 The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
+
+**1.6.0**
+- Added plugin API 1 with versioned metadata, lifecycle, app compatibility, required platform capabilities, and per-plugin permissions.
+- Added an isolated event bus and limited contribution APIs for actions, reminders, tray items, and Preferences pages.
+- Added built-in-first registration and external discovery without importing external code until the plugin is explicitly enabled.
+- Added Preferences and CLI/IPC plugin controls, a disabled-by-default example plugin, and a documented external-plugin example.
+- Plugin activation and callback failures now disable and clean up only the faulty plugin while the core application continues running.
 
 **1.5.0**
 - Replaced fixed wellness controls with general one-time, daily, weekday, and

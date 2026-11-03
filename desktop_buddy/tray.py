@@ -111,6 +111,8 @@ class BuddyTray(QObject):
 
         self.quick_actions_menu = menu.addMenu("Quick actions")
         self._refresh_quick_actions()
+        self.plugin_items_menu = menu.addMenu("Plugins")
+        self._refresh_plugin_items()
 
         self.focus_menu = menu.addMenu("Focus")
         self.act_focus_status = self.focus_menu.addAction("Ready")
@@ -220,6 +222,7 @@ class BuddyTray(QObject):
         self.act_reminders.setChecked(config.reminders_enabled)
         self.act_chime.setChecked(config.reminder_sound)
         self._refresh_quick_actions()
+        self._refresh_plugin_items()
         self.act_autostart.setChecked(self.controller.autostart_active())
         focus = self.controller._focus  # noqa: SLF001 - tray is a controller view
         focus_status = focus.state.status
@@ -263,6 +266,14 @@ class BuddyTray(QObject):
                 label,
                 lambda _checked=False, key=action_id: self.controller.run_action(key),
             )
+        plugin_actions = getattr(self.controller, "_plugin_actions", {})
+        if plugin_actions:
+            self.quick_actions_menu.addSeparator()
+        for action_id, (name, _callback) in sorted(plugin_actions.items()):
+            self.quick_actions_menu.addAction(
+                name,
+                lambda _checked=False, key=action_id: self.controller.run_action(key),
+            )
         configured = self.controller._actions.list_actions()  # noqa: SLF001
         if configured:
             self.quick_actions_menu.addSeparator()
@@ -276,6 +287,17 @@ class BuddyTray(QObject):
             if definition.type.value == "command" and not definition.approved:
                 action.setEnabled(False)
                 action.setToolTip("Approve this command explicitly in Preferences.")
+
+    def _refresh_plugin_items(self) -> None:
+        if not hasattr(self, "plugin_items_menu"):
+            return
+        self.plugin_items_menu.clear()
+        items = getattr(self.controller, "_plugin_tray_items", {})
+        for _item_id, (_plugin_id, label, callback) in sorted(items.items()):
+            self.plugin_items_menu.addAction(label, callback)
+        if not items:
+            empty = self.plugin_items_menu.addAction("No enabled plugin items")
+            empty.setEnabled(False)
 
     def show_message(self, title: str, message: str) -> None:
         if self.icon is not None and self.icon.isVisible():

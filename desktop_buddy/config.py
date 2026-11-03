@@ -99,7 +99,7 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
-CURRENT_CONFIG_SCHEMA_VERSION = 4
+CURRENT_CONFIG_SCHEMA_VERSION = 5
 
 
 def default_reminders() -> list[dict[str, Any]]:
@@ -253,6 +253,10 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("actions", [])
         version = 4
 
+    if version < 5:
+        migrated.setdefault("plugins", {})
+        version = 5
+
     migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
     return migrated
 
@@ -317,6 +321,7 @@ class Config:
     snooze_minutes: int = 10
     reminders: list[dict[str, Any]] = field(default_factory=default_reminders)
     actions: list[dict[str, Any]] = field(default_factory=list)
+    plugins: dict[str, dict[str, Any]] = field(default_factory=dict)
     focus_minutes: int = 25
     short_break_minutes: int = 5
     long_break_minutes: int = 15
@@ -478,6 +483,35 @@ class Config:
                 action_ids.add(action.id)
                 normalized_actions.append(action.to_dict())
             self.actions = normalized_actions
+        if not isinstance(self.plugins, dict):
+            self.plugins = {}
+        else:
+            normalized_plugins: dict[str, dict[str, Any]] = {}
+            for key, raw_state in self.plugins.items():
+                plugin_id = "".join(
+                    character if character.isalnum() or character in "_-" else "-"
+                    for character in str(key).strip().lower()
+                ).strip("-")[:64]
+                if not plugin_id or not isinstance(raw_state, dict):
+                    continue
+                raw_permissions = raw_state.get("permissions", [])
+                permissions = (
+                    sorted(
+                        {
+                            str(value)
+                            for value in raw_permissions
+                            if str(value)
+                            in {"actions", "reminders", "tray", "settings", "events"}
+                        }
+                    )
+                    if isinstance(raw_permissions, (list, tuple))
+                    else []
+                )
+                normalized_plugins[plugin_id] = {
+                    "enabled": bool(raw_state.get("enabled", False)),
+                    "permissions": permissions,
+                }
+            self.plugins = normalized_plugins
         try:
             self.focus_minutes = int(_clamp(int(self.focus_minutes), 1, 180))
         except (TypeError, ValueError):

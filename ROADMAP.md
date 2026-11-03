@@ -172,21 +172,21 @@ Goal: add integrations without continually enlarging the controller.
 
 ### Steps
 
-1. Define plugin metadata, lifecycle and compatibility version fields.
-2. Create an internal event bus for application and system events.
-3. Expose limited APIs for actions, reminders, tray items and settings pages.
-4. Load built-in plugins before supporting external plugins.
-5. Add enable/disable controls and per-plugin permissions.
-6. Isolate plugin failures so they cannot crash the buddy.
-7. Document a minimal example plugin.
-8. Add external plugin discovery only after the API is stable.
+1. [x] Define plugin metadata, lifecycle and compatibility version fields.
+2. [x] Create an internal event bus for application and system events.
+3. [x] Expose limited APIs for actions, reminders, tray items and settings pages.
+4. [x] Load built-in plugins before supporting external plugins.
+5. [x] Add enable/disable controls and per-plugin permissions.
+6. [x] Isolate plugin failures so they cannot crash the buddy.
+7. [x] Document a minimal example plugin.
+8. [x] Add external plugin discovery only after the API is stable.
 
 ### Acceptance criteria
 
-- A faulty plugin is disabled and logged without closing the application.
-- Plugins declare required platform capabilities and permissions.
-- The core application works with every optional plugin disabled.
-- The example plugin is covered by an integration test.
+- [x] A faulty plugin is disabled and logged without closing the application.
+- [x] Plugins declare required platform capabilities and permissions.
+- [x] The core application works with every optional plugin disabled.
+- [x] The example plugin is covered by an integration test.
 
 ---
 

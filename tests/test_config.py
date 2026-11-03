@@ -148,11 +148,42 @@ class ConfigTests(unittest.TestCase):
     def test_config_snapshots_deep_copy_reminders_and_actions(self) -> None:
         config = Config()
         config.actions = [{"id": "docs", "type": "url", "target": "https://x"}]
+        config.plugins = {"example": {"enabled": True, "permissions": ["events"]}}
         snapshot = config.to_dict()
         config.reminders[0]["title"] = "Changed"
         config.actions[0]["target"] = "https://changed"
+        config.plugins["example"]["permissions"].append("actions")
         self.assertNotEqual(snapshot["reminders"][0]["title"], "Changed")
         self.assertEqual(snapshot["actions"][0]["target"], "https://x")
+        self.assertEqual(snapshot["plugins"]["example"]["permissions"], ["events"])
+
+    def test_phase_four_config_migrates_plugin_state_container(self) -> None:
+        config = Config.from_dict({"schema_version": 4})
+        self.assertEqual(config.schema_version, CURRENT_CONFIG_SCHEMA_VERSION)
+        self.assertEqual(config.plugins, {})
+
+    def test_plugin_state_is_normalized(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+                "plugins": {
+                    "My Plugin!": {
+                        "enabled": 1,
+                        "permissions": ["events", "actions", "filesystem", "events"],
+                    },
+                    "broken": "not a mapping",
+                },
+            }
+        )
+        self.assertEqual(
+            config.plugins,
+            {
+                "my-plugin": {
+                    "enabled": True,
+                    "permissions": ["actions", "events"],
+                }
+            },
+        )
 
     def test_invalid_and_duplicate_phase_four_definitions_are_removed(self) -> None:
         config = Config.from_dict(

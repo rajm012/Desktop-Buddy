@@ -175,6 +175,19 @@ class PhraseParserTests(unittest.TestCase):
 
 
 class GeneralReminderTests(unittest.TestCase):
+    def test_missing_action_id_stays_unattached(self) -> None:
+        reminder = Reminder.from_dict(
+            {
+                "id": "plain",
+                "title": "Plain",
+                "recurrence": "daily",
+                "time": "09:00",
+            }
+        )
+        self.assertIsNotNone(reminder)
+        assert reminder is not None
+        self.assertIsNone(reminder.action_id)
+
     def test_one_time_reminder_only_fires_once(self) -> None:
         config = Config()
         config.reminders = [
