@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .character import Palette, icon_pixmap
 from .config import SPECIES, THEMES
+from .focus import FocusStatus, SessionKind, format_duration, kind_label
 from .platforms.base import Capability
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class BuddyTray(QObject):
         self._theme_actions: list[tuple[QAction, str]] = []
         self._species_actions: list[tuple[QAction, str]] = []
         self._build_menu()
+        self.menu.aboutToShow.connect(self.refresh)
 
         self.icon: QSystemTrayIcon | None = None
         if QSystemTrayIcon.isSystemTrayAvailable():
@@ -106,6 +108,30 @@ class BuddyTray(QObject):
         reminders_menu.addAction("Water now", lambda: controller.remind_now("water"))
         reminders_menu.addAction("Stretch now", lambda: controller.remind_now("break"))
         reminders_menu.addAction("Upcoming…", controller.show_reminders)
+
+        self.focus_menu = menu.addMenu("Focus")
+        self.act_focus_status = self.focus_menu.addAction("Ready")
+        self.act_focus_status.setEnabled(False)
+        self.focus_menu.addSeparator()
+        self.act_focus_start = self.focus_menu.addAction(
+            "Start focus", lambda: controller.focus_start(SessionKind.FOCUS)
+        )
+        self.act_focus_short = self.focus_menu.addAction(
+            "Start short break",
+            lambda: controller.focus_start(SessionKind.SHORT_BREAK),
+        )
+        self.act_focus_long = self.focus_menu.addAction(
+            "Start long break", lambda: controller.focus_start(SessionKind.LONG_BREAK)
+        )
+        self.focus_menu.addSeparator()
+        self.act_focus_pause = self.focus_menu.addAction(
+            "Pause", controller.focus_pause
+        )
+        self.act_focus_resume = self.focus_menu.addAction(
+            "Resume", controller.focus_resume
+        )
+        self.act_focus_skip = self.focus_menu.addAction("Skip", controller.focus_skip)
+        self.act_focus_stop = self.focus_menu.addAction("Stop", controller.focus_stop)
 
         speed_menu = menu.addMenu("Speed")
         speed_group = QActionGroup(speed_menu)
@@ -191,6 +217,23 @@ class BuddyTray(QObject):
         self.act_reminders.setChecked(config.reminders_enabled)
         self.act_chime.setChecked(config.reminder_sound)
         self.act_autostart.setChecked(self.controller.autostart_active())
+        focus = self.controller._focus  # noqa: SLF001 - tray is a controller view
+        focus_status = focus.state.status
+        focus_label = kind_label(focus.state.kind)
+        focus_time = format_duration(focus.remaining_seconds())
+        self.act_focus_status.setText(
+            f"{focus_label} — {focus_time} ({focus_status.value})"
+        )
+        stopped = focus_status is FocusStatus.STOPPED
+        running = focus_status is FocusStatus.RUNNING
+        paused_focus = focus_status is FocusStatus.PAUSED
+        self.act_focus_start.setEnabled(stopped)
+        self.act_focus_short.setEnabled(stopped)
+        self.act_focus_long.setEnabled(stopped)
+        self.act_focus_pause.setEnabled(running)
+        self.act_focus_resume.setEnabled(paused_focus)
+        self.act_focus_skip.setEnabled(running or paused_focus)
+        self.act_focus_stop.setEnabled(running or paused_focus)
         for action, value in self._speed_actions:
             action.setChecked(abs(config.speed - value) < 0.01)
         for action, value in self._size_actions:

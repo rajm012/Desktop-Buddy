@@ -44,6 +44,24 @@ class RendererSmokeTests(unittest.TestCase):
                     )
                     self.assertGreater(opaque_pixels, 500)
 
+    def test_robot_focus_and_break_faces_are_visually_distinct(self) -> None:
+        def render(kind: str) -> bytes:
+            image = QImage(168, 192, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(image)
+            brain = Brain(
+                world=World(left=-400.0, right=400.0, ground=0.0),
+                state=State.IDLE,
+                focus_kind=kind,
+                focus_status="running",
+            )
+            character = make_character("robot", Palette.from_colors(THEMES["circuit"]))
+            character.paint(painter, brain, 168, 192)
+            painter.end()
+            return bytes(image.bits().asstring(image.sizeInBytes()))
+
+        self.assertNotEqual(render("focus"), render("short_break"))
+
 
 if __name__ == "__main__":
     unittest.main()

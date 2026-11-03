@@ -12,7 +12,7 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import fields
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable
 
 from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
@@ -23,6 +23,16 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from . import APP_SLUG, __version__
 from .character import Palette
 from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
+from .focus import (
+    FocusEngine,
+    FocusEvent,
+    FocusEventType,
+    FocusSettings,
+    FocusState,
+    SessionKind,
+    format_duration,
+    kind_label,
+)
 from .platforms import get_backend
 from .platforms.base import Capability, PlatformBackend
 from .prefs import OnboardingDialog, PreferencesDialog
@@ -175,27 +185,42 @@ class Controller(QObject):
         self.config.autostart = self.backend.autostart_enabled()
         self.window = BuddyWindow(config, backend=self.backend)
         self.window.config_changed_callback = self._schedule_save
+        self._rng = random.Random()
+        self._state_dir = self.backend.paths().state_dir
+        self._wellness_path = self._state_dir / "reminders.json"
+        self._focus_path = self._state_dir / "focus.json"
+        self._wellness = self._build_wellness()
+        self._focus = FocusEngine(
+            FocusSettings.from_config(self.config),
+            FocusState.load(self._focus_path),
+        )
+        self.window.set_focus_state(
+            self._focus.state.kind,
+            self._focus.state.status,
+            self._focus.remaining_seconds(),
+        )
         self.tray = BuddyTray(self)
         self.window.context_menu_requested.connect(self._show_context_menu)
         self._prefs: PreferencesDialog | None = None
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self.save_config)
-        self._rng = random.Random()
-        self._state_dir = self.backend.paths().state_dir
-        self._wellness_path = self._state_dir / "reminders.json"
-        self._wellness = self._build_wellness()
         self._toast: ReminderToast | None = None
         self._toast_queue: list[tuple[Reminder, str]] = []
         self._reminder_timer = QTimer(self)
         self._reminder_timer.setInterval(20_000)
         self._reminder_timer.timeout.connect(self._check_reminders)
         self._reminder_timer.start()
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setInterval(1000)
+        self._focus_timer.timeout.connect(self._check_focus)
+        self._focus_timer.start()
         self._server = self._start_ipc()
 
         if self.tray.icon is not None:
             self.tray.icon.show()
         self.window.show()
+        QTimer.singleShot(200, self._check_focus)
         QTimer.singleShot(6000, self._check_reminders)
         if first_run:
             QTimer.singleShot(700, self.open_onboarding)
@@ -230,6 +255,7 @@ class Controller(QObject):
         self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
         self._rebuild_wellness()
+        self._rebuild_focus()
         self.tray.refresh()
         self._schedule_save()
 
@@ -243,6 +269,7 @@ class Controller(QObject):
         self.config.autostart = self.backend.autostart_enabled()
         self.window.apply_config()
         self._rebuild_wellness()
+        self._rebuild_focus()
         self.tray.refresh()
         self._schedule_save()
 
@@ -549,6 +576,156 @@ class Controller(QObject):
         self._rebuild_wellness()
         self._schedule_save()
 
+    # ------------------------------------------------------------------- focus
+    def _rebuild_focus(self) -> None:
+        self._focus.set_settings(FocusSettings.from_config(self.config))
+        self._sync_focus_ui()
+
+    def _save_focus(self) -> None:
+        try:
+            self._focus.state.save(self._focus_path)
+        except OSError as exc:
+            log.warning("Could not save focus state: %s", exc)
+
+    def _sync_focus_ui(self) -> None:
+        self.window.set_focus_state(
+            self._focus.state.kind,
+            self._focus.state.status,
+            self._focus.remaining_seconds(),
+        )
+        self.tray.refresh()
+        if self._prefs is not None:
+            self._prefs.refresh_focus_status()
+
+    def set_focus_setting(self, key: str, value: int | bool) -> None:
+        if key not in {
+            "focus_minutes",
+            "short_break_minutes",
+            "long_break_minutes",
+            "long_break_every",
+            "focus_respect_quiet_hours",
+            "focus_suppress_fullscreen",
+        }:
+            return
+        setattr(self.config, key, value)
+        self.config.normalize()
+        self._rebuild_focus()
+        self._schedule_save()
+
+    def focus_start(self, kind: SessionKind | str | None = None) -> bool:
+        if isinstance(kind, str):
+            try:
+                kind = SessionKind(kind.replace("-", "_"))
+            except ValueError:
+                return False
+        changed = self._focus.start(kind)
+        if not changed:
+            return False
+        self._save_focus()
+        self._sync_focus_ui()
+        label = kind_label(self._focus.state.kind)
+        self.window.focus_started(self._focus.state.kind, f"{label} started")
+        return True
+
+    def focus_pause(self) -> bool:
+        changed = self._focus.pause()
+        if changed:
+            self._save_focus()
+            self._sync_focus_ui()
+            self.window.say("Focus timer paused", 3.0)
+        return changed
+
+    def focus_resume(self) -> bool:
+        changed = self._focus.resume()
+        if changed:
+            self._save_focus()
+            self._sync_focus_ui()
+            self.window.say("Back to it!", 3.0)
+        return changed
+
+    def focus_skip(self) -> bool:
+        event = self._focus.skip()
+        if event is None:
+            return False
+        self._save_focus()
+        self._sync_focus_ui()
+        self.window.say(f"Next: {kind_label(event.next_kind)}", 3.0)
+        return True
+
+    def focus_stop(self) -> bool:
+        changed = self._focus.stop()
+        if changed:
+            self._save_focus()
+            self._sync_focus_ui()
+            self.window.say("Focus cycle stopped", 3.0)
+        return changed
+
+    def _check_focus(self) -> None:
+        events = self._focus.tick()
+        remaining = self._focus.remaining_seconds()
+        self.window.set_focus_state(
+            self._focus.state.kind, self._focus.state.status, remaining
+        )
+        if not events:
+            if self._prefs is not None:
+                self._prefs.refresh_focus_status()
+            return
+        self._save_focus()
+        for event in events:
+            self._handle_focus_event(event)
+        self._sync_focus_ui()
+
+    def _handle_focus_event(self, event: FocusEvent) -> None:
+        if event.type is not FocusEventType.COMPLETED:
+            return
+        if event.kind is SessionKind.FOCUS:
+            message = f"Focus complete — next: {kind_label(event.next_kind)}"
+            sound_kind = "break"
+        else:
+            message = "Break complete — ready to focus"
+            sound_kind = "default"
+        if not self._focus_attention_allowed(event.at):
+            log.info("Focus completion notification suppressed: %s", message)
+            return
+        self.window.focus_completed(event.kind, event.next_kind, message)
+        self.tray.show_message("Desktop Buddy — Focus", message)
+        if not self.config.silent_mode and self.backend.supports(Capability.AUDIO):
+            self.backend.play_audio(chime_path(sound_kind, self._state_dir))
+
+    def _focus_attention_allowed(self, now: datetime) -> bool:
+        if self.config.do_not_disturb:
+            return False
+        if self.config.focus_respect_quiet_hours and not self._wellness.active_hours_ok(
+            now
+        ):
+            return False
+        if self.config.focus_suppress_fullscreen and self.backend.supports(
+            Capability.ACTIVE_WINDOW
+        ):
+            probe = self.backend.create_active_window_probe()
+            try:
+                info = probe.active_window() if probe.available else None
+                if info is not None and info.fullscreen:
+                    return False
+            finally:
+                probe.close()
+        return True
+
+    def focus_summary(self) -> str:
+        state = self._focus.state
+        label = kind_label(state.kind)
+        remaining = format_duration(self._focus.remaining_seconds())
+        status = state.status.value
+        today_minutes = self._focus.today_seconds() // 60
+        return (
+            f"{status}: {label} {remaining}\n"
+            f"Today: {today_minutes} focused minutes · "
+            f"{state.completed_focus_sessions} completed sessions"
+        )
+
+    def focus_history(self, days: int = 7) -> list[tuple[date, int]]:
+        return self._focus.recent_history(days)
+
     def set_autostart(self, enabled: bool) -> None:
         enabled = bool(enabled)
         if enabled and not self.backend.supports(Capability.AUTOSTART):
@@ -641,6 +818,7 @@ class Controller(QObject):
     def quit(self, *_args: object) -> None:
         self.save_config()
         self._save_wellness()
+        self._save_focus()
         if self.tray.icon is not None:
             self.tray.icon.hide()
         self.app.quit()
@@ -686,6 +864,29 @@ class Controller(QObject):
                 self.set_reminders_enabled(parts[1] == "on")
                 return f"reminders {parts[1]}"
             return "usage: reminders on|off|status"
+        elif verb == "focus" and len(parts) > 1:
+            action = parts[1]
+            if action == "status":
+                return self.focus_summary()
+            if action == "start":
+                kind = parts[2] if len(parts) > 2 else None
+                return "focus started" if self.focus_start(kind) else "focus unchanged"
+            actions = {
+                "pause": self.focus_pause,
+                "resume": self.focus_resume,
+                "skip": self.focus_skip,
+                "stop": self.focus_stop,
+            }
+            handler = actions.get(action)
+            if handler is None:
+                return "usage: focus start [focus|short-break|long-break]|pause|resume|skip|stop|status"
+            replies = {
+                "pause": "focus paused",
+                "resume": "focus resumed",
+                "skip": "focus skipped",
+                "stop": "focus stopped",
+            }
+            return replies[action] if handler() else "focus unchanged"
         elif verb == "click-through" and len(parts) > 1:
             self.set_click_through(parts[1] == "on")
         elif verb == "autostart" and len(parts) > 1:
@@ -721,6 +922,7 @@ class Controller(QObject):
             f"toast={toast_info} "
             f"species={self.config.species} visible={self.window.isVisible()} "
             f"paused={self.window.is_paused}"
+            f" focus={self._focus.state.status.value}:{self._focus.state.kind.value}"
         )
 
     def _greet(self) -> None:
@@ -810,6 +1012,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reminders = sub.add_parser("reminders", help="manage wellness reminders")
     reminders.add_argument("value", choices=("on", "off", "status"))
+    focus = sub.add_parser("focus", help="control the focus timer")
+    focus.add_argument(
+        "action", choices=("start", "pause", "resume", "skip", "stop", "status")
+    )
+    focus.add_argument(
+        "kind",
+        nargs="?",
+        choices=("focus", "short-break", "long-break"),
+        help="session type when starting",
+    )
     character = sub.add_parser("character", help="switch character")
     character.add_argument("value", choices=tuple(SPECIES))
     click = sub.add_parser("click-through", help="toggle input pass-through")
@@ -855,6 +1067,16 @@ def main(argv: list[str] | None = None) -> int:
             config.save()
             print(f"Reminders {args.value} (applies next time it starts)")
             return 0
+        if args.command == "focus":
+            command = f"focus {args.action}"
+            if args.kind:
+                command += f" {args.kind}"
+            reply = request_reply(command)
+            if reply:
+                print(reply)
+                return 0
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
         if args.command == "status":
             reply = request_status()
             if reply:

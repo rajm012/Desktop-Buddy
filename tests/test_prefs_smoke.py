@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from desktop_buddy.config import Config  # noqa: E402
+from desktop_buddy.focus import FocusEngine, FocusSettings  # noqa: E402
 from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.platforms.linux import LinuxBackend  # noqa: E402
 from desktop_buddy.prefs import OnboardingDialog, PreferencesDialog  # noqa: E402
@@ -21,6 +22,7 @@ class _StubController:
     def __init__(self, backend=None) -> None:  # noqa: ANN001
         self.config = Config()
         self.backend = backend or GenericPlatformBackend()
+        self._focus = FocusEngine(FocusSettings.from_config(self.config))
 
     def autostart_active(self) -> bool:
         return False
@@ -45,6 +47,8 @@ class PreferencesSmokeTests(unittest.TestCase):
         self.assertTrue(dialog.check_reminders is not None)
         self.assertIn("lunch", dialog.meal_widgets)
         self.assertEqual(dialog.water_slider.minimum(), 10)
+        self.assertEqual(dialog.focus_minutes.value(), 25)
+        self.assertTrue(dialog.focus_start_button.isEnabled())
         self.assertFalse(dialog.check_click.isEnabled())
         self.assertIn("unavailable", dialog.capability_notice.text().lower())
         self.assertEqual(

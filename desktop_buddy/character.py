@@ -804,6 +804,11 @@ class Robot:
     def _paint_head(self, painter: QPainter, brain: Brain) -> None:
         sleeping = brain.state is State.SLEEP
         dancing = brain.state is State.DANCE
+        focusing = brain.focus_status == "running" and brain.focus_kind == "focus"
+        focus_break = brain.focus_status == "running" and brain.focus_kind in (
+            "short_break",
+            "long_break",
+        )
         surprised = brain.state in (State.AIR, State.DRAG, State.CLIMB)
         head_y = -130.0 if not sleeping else -122.0
         nod = 0.0
@@ -865,6 +870,10 @@ class Robot:
         eye_color = QColor(self.palette.belly)
         if dancing:
             eye_color = QColor(self.palette.blush).lighter(112)
+        elif focusing:
+            eye_color = QColor("#70e6ff")
+        elif focus_break:
+            eye_color = QColor("#9cf08b")
         for side in (-1, 1):
             eye_x = side * 13.0 + look_x * 3.0
             current_eye_y = eye_y
@@ -879,6 +888,11 @@ class Robot:
                 continue
             rx = 8.0 if surprised else 7.0
             ry = 12.0 if surprised else 10.5
+            if focusing and not surprised:
+                rx, ry = 7.5, 5.5
+                current_eye_y += math.sin(brain.anim_time * 2.0) * 0.8
+            elif focus_break and not surprised:
+                rx, ry = 7.5, 8.0
             if brain.state is State.AIR:
                 if brain.vy < -100.0:
                     # Bright, tall eyes lead the take-off.

@@ -316,6 +316,11 @@ class X11WindowProbe(ActiveWindowProbe):
                 self._atom(b"_NET_WM_STATE"),
                 self._atom(b"_NET_WM_STATE_HIDDEN"),
             ),
+            fullscreen=self._has_atom(
+                window,
+                self._atom(b"_NET_WM_STATE"),
+                self._atom(b"_NET_WM_STATE_FULLSCREEN"),
+            ),
         )
 
 

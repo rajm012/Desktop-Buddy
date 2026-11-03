@@ -134,6 +134,8 @@ class Brain:
     perch: Perch | None = None
     perched: bool = False
     dance_left: float = 0.0
+    focus_kind: str = ""
+    focus_status: str = "stopped"
 
     _blink_countdown: float = 2.0
     _blink_phase: float = 0.0

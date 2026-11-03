@@ -71,6 +71,7 @@ class WindowInfo:
     width: int
     height: int
     hidden: bool = False
+    fullscreen: bool = False
 
 
 class ActiveWindowProbe:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from collections.abc import Callable
@@ -30,6 +31,7 @@ from .character import (
 )
 from .config import Config
 from .effects import ParticleSystem
+from .focus import FocusStatus, SessionKind, format_duration
 from .platforms import get_backend
 from .platforms.base import Capability, PlatformBackend
 
@@ -88,6 +90,10 @@ class BuddyWindow(QWidget):
         self._perch_window_id: int | None = None
         self._perch_since = 0.0
         self._perch_loss_since: float | None = None
+        self._focus_kind = SessionKind.FOCUS
+        self._focus_status = FocusStatus.STOPPED
+        self._focus_remaining = 0
+        self._focus_completion_left = 0.0
 
         screen = QGuiApplication.primaryScreen()
         self._screen: QScreen | None = screen
@@ -265,6 +271,40 @@ class BuddyWindow(QWidget):
                 self._handle_event(event)
         self.update()
 
+    def set_focus_state(
+        self, kind: SessionKind, status: FocusStatus, remaining_seconds: int
+    ) -> None:
+        self._focus_kind = kind
+        self._focus_status = status
+        self._focus_remaining = max(0, int(remaining_seconds))
+        self._brain.focus_kind = kind.value
+        self._brain.focus_status = status.value
+        self.update()
+
+    def focus_started(self, kind: SessionKind, text: str) -> None:
+        self.say(text, 4.0)
+        if not self.config.reduced_motion:
+            particle = "sparkles" if kind is SessionKind.FOCUS else "hearts"
+            self._particles.emit(particle, 0.0, -54.0, self._palette)
+        self.update()
+
+    def focus_completed(
+        self, kind: SessionKind, next_kind: SessionKind, text: str
+    ) -> None:
+        self.say(text, 8.0)
+        self._focus_completion_left = 4.0
+        if not self.config.reduced_motion:
+            self._particles.emit("sparkles", 0.0, -46.0, self._palette)
+            self._particles.emit("hearts", 0.0, -68.0, self._palette)
+            if not self._paused and self._brain.state not in (
+                State.AIR,
+                State.DRAG,
+                State.CLIMB,
+            ):
+                for event in self._brain.dance():
+                    self._handle_event(event)
+        self.update()
+
     def apply_config(self) -> None:
         self.config.normalize()
         config = self.config
@@ -397,6 +437,8 @@ class BuddyWindow(QWidget):
 
         if self._bubble_left > 0.0:
             self._bubble_left = max(0.0, self._bubble_left - dt)
+        if self._focus_completion_left > 0.0:
+            self._focus_completion_left = max(0.0, self._focus_completion_left - dt)
 
         if self._paused:
             self.update()
@@ -669,9 +711,57 @@ class BuddyWindow(QWidget):
         painter.translate(self.width() / 2.0, feet_local)
         painter.scale(unit, unit)
         self._particles.paint(painter)
+        self._paint_focus_badge(painter)
         self._paint_bubble(painter, unit)
         painter.restore()
         painter.end()
+
+    def _paint_focus_badge(self, painter: QPainter) -> None:
+        active = self._focus_status in (FocusStatus.RUNNING, FocusStatus.PAUSED)
+        if not active and self._focus_completion_left <= 0.0:
+            return
+        painter.save()
+        x = 42.0
+        y = -78.0
+        pulse = 1.0 + 0.06 * abs(math.sin(self._brain.anim_time * 3.0))
+        if self.config.reduced_motion:
+            pulse = 1.0
+        painter.translate(x, y)
+        painter.scale(pulse, pulse)
+        fill = QColor("#d9f3ff")
+        outline = QColor("#287a9c")
+        symbol = "F"
+        if self._focus_kind is not SessionKind.FOCUS:
+            fill = QColor("#e7f7df")
+            outline = QColor("#4d8a45")
+            symbol = "B"
+        if self._focus_status is FocusStatus.PAUSED:
+            fill = QColor("#f3f0f7")
+            outline = QColor("#6d607e")
+            symbol = "Ⅱ"
+        if self._focus_completion_left > 0.0:
+            fill = QColor("#fff0b8")
+            outline = QColor("#b17800")
+            symbol = "✓"
+        painter.setBrush(fill)
+        painter.setPen(QPen(outline, 2.0))
+        painter.drawEllipse(QRectF(-17.0, -17.0, 34.0, 34.0))
+        font = QFont("DejaVu Sans")
+        font.setBold(True)
+        font.setPixelSize(13)
+        painter.setFont(font)
+        painter.setPen(outline)
+        painter.drawText(
+            QRectF(-16.0, -14.0, 32.0, 18.0), Qt.AlignmentFlag.AlignCenter, symbol
+        )
+        font.setPixelSize(7)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(-19.0, 1.0, 38.0, 12.0),
+            Qt.AlignmentFlag.AlignCenter,
+            format_duration(self._focus_remaining),
+        )
+        painter.restore()
 
     def _paint_bubble(self, painter: QPainter, unit: float) -> None:
         if not self._bubble_text or self._bubble_left <= 0.0:

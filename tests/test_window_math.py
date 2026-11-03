@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 from desktop_buddy.behavior import Perch  # noqa: E402
 from desktop_buddy.character import CANVAS_W, FOOT_PAD_UNITS  # noqa: E402
 from desktop_buddy.config import Config  # noqa: E402
+from desktop_buddy.focus import FocusStatus, SessionKind  # noqa: E402
 from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.window import BuddyWindow  # noqa: E402
 
@@ -71,6 +72,16 @@ class WindowMathTests(unittest.TestCase):
         expected_y = round(300.0 - self.window.height() + self._pad_px())
         self.assertEqual(self.window.y(), expected_y)
         self._assert_buddy_at_brain_position()
+
+    def test_focus_state_is_reflected_by_window_and_brain(self) -> None:
+        self.window.set_focus_state(SessionKind.FOCUS, FocusStatus.RUNNING, 1200)
+        self.assertEqual(self.window._focus_remaining, 1200)
+        self.assertEqual(self.window._brain.focus_kind, "focus")
+        self.assertEqual(self.window._brain.focus_status, "running")
+        self.window.focus_completed(
+            SessionKind.FOCUS, SessionKind.SHORT_BREAK, "Focus complete"
+        )
+        self.assertGreater(self.window._focus_completion_left, 0.0)
 
 
 if __name__ == "__main__":

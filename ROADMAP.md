@@ -123,21 +123,21 @@ Goal: deliver the first major productivity feature.
 
 ### Steps
 
-1. Create a platform-independent focus-session state machine.
-2. Support focus, short-break and long-break durations.
-3. Add start, pause, resume, skip and stop actions.
-4. Add tray and CLI controls.
-5. Give Bolt distinct focus, break and completion animations.
-6. Persist an interrupted session and restore it after restart.
-7. Store local daily totals and display a small history view.
-8. Respect quiet hours and fullscreen/do-not-disturb settings.
+1. [x] Create a platform-independent focus-session state machine.
+2. [x] Support focus, short-break and long-break durations.
+3. [x] Add start, pause, resume, skip and stop actions.
+4. [x] Add tray and CLI controls.
+5. [x] Give Bolt distinct focus, break and completion animations.
+6. [x] Persist an interrupted session and restore it after restart.
+7. [x] Store local daily totals and display a small history view.
+8. [x] Respect quiet hours and fullscreen/do-not-disturb settings.
 
 ### Acceptance criteria
 
-- Timer accuracy survives UI frame-rate changes and computer sleep.
-- Sessions can be controlled from the tray and CLI.
-- Restarting the application restores an active session correctly.
-- No account or network connection is required.
+- [x] Timer accuracy survives UI frame-rate changes and computer sleep.
+- [x] Sessions can be controlled from the tray and CLI.
+- [x] Restarting the application restores an active session correctly.
+- [x] No account or network connection is required.
 
 ---
 

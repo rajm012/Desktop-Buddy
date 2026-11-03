@@ -121,6 +121,31 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.silent_mode)
         self.assertTrue(config.do_not_disturb)
 
+    def test_focus_defaults_and_migration(self) -> None:
+        config = Config.from_dict({"schema_version": 2})
+        self.assertEqual(config.schema_version, CURRENT_CONFIG_SCHEMA_VERSION)
+        self.assertEqual(config.focus_minutes, 25)
+        self.assertEqual(config.short_break_minutes, 5)
+        self.assertEqual(config.long_break_minutes, 15)
+        self.assertEqual(config.long_break_every, 4)
+        self.assertTrue(config.focus_respect_quiet_hours)
+        self.assertTrue(config.focus_suppress_fullscreen)
+
+    def test_invalid_focus_values_are_normalized(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+                "focus_minutes": 999,
+                "short_break_minutes": 0,
+                "long_break_minutes": "bad",
+                "long_break_every": 50,
+            }
+        )
+        self.assertEqual(config.focus_minutes, 180)
+        self.assertEqual(config.short_break_minutes, 1)
+        self.assertEqual(config.long_break_minutes, 15)
+        self.assertEqual(config.long_break_every, 12)
+
     def test_invalid_times_are_normalized(self) -> None:
         config = Config.from_dict({"lunch_time": "25:99", "water_interval_minutes": 5})
         self.assertEqual(config.lunch_time, "13:30")

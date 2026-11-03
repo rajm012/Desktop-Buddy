@@ -98,7 +98,7 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
-CURRENT_CONFIG_SCHEMA_VERSION = 2
+CURRENT_CONFIG_SCHEMA_VERSION = 3
 
 
 def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +121,15 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("silent_mode", False)
         migrated.setdefault("do_not_disturb", False)
         version = 2
+
+    if version < 3:
+        migrated.setdefault("focus_minutes", 25)
+        migrated.setdefault("short_break_minutes", 5)
+        migrated.setdefault("long_break_minutes", 15)
+        migrated.setdefault("long_break_every", 4)
+        migrated.setdefault("focus_respect_quiet_hours", True)
+        migrated.setdefault("focus_suppress_fullscreen", True)
+        version = 3
 
     migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
     return migrated
@@ -184,6 +193,12 @@ class Config:
     active_end: str = "22:30"
     reminder_grace_minutes: int = 45
     snooze_minutes: int = 10
+    focus_minutes: int = 25
+    short_break_minutes: int = 5
+    long_break_minutes: int = 15
+    long_break_every: int = 4
+    focus_respect_quiet_hours: bool = True
+    focus_suppress_fullscreen: bool = True
     autostart: bool = False
     paused: bool = False
     position_x: float | None = None
@@ -268,6 +283,8 @@ class Config:
             "winddown_enabled",
             "water_enabled",
             "break_enabled",
+            "focus_respect_quiet_hours",
+            "focus_suppress_fullscreen",
             "autostart",
             "paused",
         ):
@@ -309,6 +326,22 @@ class Config:
             self.snooze_minutes = int(_clamp(int(self.snooze_minutes), 1, 60))
         except (TypeError, ValueError):
             self.snooze_minutes = 10
+        try:
+            self.focus_minutes = int(_clamp(int(self.focus_minutes), 1, 180))
+        except (TypeError, ValueError):
+            self.focus_minutes = 25
+        try:
+            self.short_break_minutes = int(_clamp(int(self.short_break_minutes), 1, 60))
+        except (TypeError, ValueError):
+            self.short_break_minutes = 5
+        try:
+            self.long_break_minutes = int(_clamp(int(self.long_break_minutes), 1, 120))
+        except (TypeError, ValueError):
+            self.long_break_minutes = 15
+        try:
+            self.long_break_every = int(_clamp(int(self.long_break_every), 1, 12))
+        except (TypeError, ValueError):
+            self.long_break_every = 4
         if self.position_x is not None:
             try:
                 self.position_x = float(self.position_x)

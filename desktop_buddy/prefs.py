@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSpinBox,
     QTabWidget,
     QTimeEdit,
     QVBoxLayout,
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
 from .behavior import Brain, State, World
 from .character import Palette, make_character
 from .config import SPECIES, THEMES, Config
+from .focus import FocusStatus, SessionKind, format_duration, kind_label
 from .platforms.base import Capability
 
 
@@ -150,6 +152,11 @@ class PreferencesDialog(QDialog):
         self._apply_capabilities()
         self._load_from_config()
         self._loading = False
+        self._focus_refresh_timer = QTimer(self)
+        self._focus_refresh_timer.setInterval(1000)
+        self._focus_refresh_timer.timeout.connect(self.refresh_focus_status)
+        self._focus_refresh_timer.start()
+        self.refresh_focus_status()
 
     def _page(self, name: str) -> tuple[QWidget, QVBoxLayout]:
         page = QWidget()
@@ -276,9 +283,72 @@ class PreferencesDialog(QDialog):
 
     def _build_focus_tab(self) -> None:
         _, layout = self._page("Focus")
-        title = QLabel("Attention controls")
+        title = QLabel("Focus timer")
         title.setStyleSheet("font-size: 16px; font-weight: 600;")
         layout.addWidget(title)
+
+        status_group = QGroupBox("Current session")
+        status_layout = QVBoxLayout(status_group)
+        self.focus_status_label = QLabel()
+        self.focus_status_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self.focus_today_label = QLabel()
+        status_layout.addWidget(self.focus_status_label)
+        status_layout.addWidget(self.focus_today_label)
+        controls = QHBoxLayout()
+        self.focus_kind_combo = QComboBox()
+        self._shown_focus_kind: SessionKind | None = None
+        for kind in SessionKind:
+            self.focus_kind_combo.addItem(kind_label(kind), kind)
+        self.focus_start_button = QPushButton("Start")
+        self.focus_pause_button = QPushButton("Pause")
+        self.focus_resume_button = QPushButton("Resume")
+        self.focus_skip_button = QPushButton("Skip")
+        self.focus_stop_button = QPushButton("Stop")
+        self.focus_start_button.clicked.connect(
+            lambda: self.controller.focus_start(self.focus_kind_combo.currentData())
+        )
+        self.focus_pause_button.clicked.connect(self.controller.focus_pause)
+        self.focus_resume_button.clicked.connect(self.controller.focus_resume)
+        self.focus_skip_button.clicked.connect(self.controller.focus_skip)
+        self.focus_stop_button.clicked.connect(self.controller.focus_stop)
+        controls.addWidget(self.focus_kind_combo)
+        for button in (
+            self.focus_start_button,
+            self.focus_pause_button,
+            self.focus_resume_button,
+            self.focus_skip_button,
+            self.focus_stop_button,
+        ):
+            controls.addWidget(button)
+        status_layout.addLayout(controls)
+        layout.addWidget(status_group)
+
+        settings_group = QGroupBox("Durations and cadence")
+        settings_form = QFormLayout(settings_group)
+        self.focus_minutes = self._minute_spin(1, 180)
+        self.short_break_minutes = self._minute_spin(1, 60)
+        self.long_break_minutes = self._minute_spin(1, 120)
+        self.long_break_every = QSpinBox()
+        self.long_break_every.setRange(1, 12)
+        self.long_break_every.setSuffix(" focus sessions")
+        settings_form.addRow("Focus", self.focus_minutes)
+        settings_form.addRow("Short break", self.short_break_minutes)
+        settings_form.addRow("Long break", self.long_break_minutes)
+        settings_form.addRow("Long break after", self.long_break_every)
+        self.focus_minutes.valueChanged.connect(
+            lambda value: self._on_focus_setting("focus_minutes", value)
+        )
+        self.short_break_minutes.valueChanged.connect(
+            lambda value: self._on_focus_setting("short_break_minutes", value)
+        )
+        self.long_break_minutes.valueChanged.connect(
+            lambda value: self._on_focus_setting("long_break_minutes", value)
+        )
+        self.long_break_every.valueChanged.connect(
+            lambda value: self._on_focus_setting("long_break_every", value)
+        )
+        layout.addWidget(settings_group)
+
         self.check_dnd = QCheckBox(
             "Do not disturb (pause automatic reminders and interruptions)"
         )
@@ -286,14 +356,34 @@ class PreferencesDialog(QDialog):
             lambda value: self._set_setting(self.controller.set_do_not_disturb, value)
         )
         layout.addWidget(self.check_dnd)
-        note = QLabel(
-            "The focus timer is planned for Phase 3. Do not disturb is available now "
-            "and keeps manual tray actions available."
+        self.check_focus_quiet = QCheckBox(
+            "Keep completion notifications within reminder active hours"
         )
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #555;")
-        layout.addWidget(note)
+        self.check_focus_fullscreen = QCheckBox(
+            "Suppress completion notifications while an app is fullscreen"
+        )
+        self.check_focus_quiet.toggled.connect(
+            lambda value: self._on_focus_setting("focus_respect_quiet_hours", value)
+        )
+        self.check_focus_fullscreen.toggled.connect(
+            lambda value: self._on_focus_setting("focus_suppress_fullscreen", value)
+        )
+        layout.addWidget(self.check_focus_quiet)
+        layout.addWidget(self.check_focus_fullscreen)
+        history_group = QGroupBox("Last 7 days")
+        history_layout = QVBoxLayout(history_group)
+        self.focus_history_label = QLabel()
+        self.focus_history_label.setWordWrap(True)
+        history_layout.addWidget(self.focus_history_label)
+        layout.addWidget(history_group)
         layout.addStretch()
+
+    @staticmethod
+    def _minute_spin(low: int, high: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(low, high)
+        spin.setSuffix(" min")
+        return spin
 
     def _build_integrations_tab(self) -> None:
         _, layout = self._page("Integrations")
@@ -413,6 +503,12 @@ class PreferencesDialog(QDialog):
         self.check_reduced_motion.setChecked(config.reduced_motion)
         self.check_silent.setChecked(config.silent_mode)
         self.check_dnd.setChecked(config.do_not_disturb)
+        self.focus_minutes.setValue(config.focus_minutes)
+        self.short_break_minutes.setValue(config.short_break_minutes)
+        self.long_break_minutes.setValue(config.long_break_minutes)
+        self.long_break_every.setValue(config.long_break_every)
+        self.check_focus_quiet.setChecked(config.focus_respect_quiet_hours)
+        self.check_focus_fullscreen.setChecked(config.focus_suppress_fullscreen)
         self.check_perch.setChecked(config.perch_on_windows)
         self.check_autostart.setChecked(self.controller.autostart_active())
         self.check_reminders.setChecked(config.reminders_enabled)
@@ -432,6 +528,7 @@ class PreferencesDialog(QDialog):
             (self.check_perch, Capability.ACTIVE_WINDOW),
             (self.check_chime, Capability.AUDIO),
             (self.check_autostart, Capability.AUTOSTART),
+            (self.check_focus_fullscreen, Capability.ACTIVE_WINDOW),
         )
         for widget, capability in controls:
             info = self.controller.backend.capability(capability)
@@ -517,6 +614,48 @@ class PreferencesDialog(QDialog):
         self.break_label.setText(f"{value} min")
         if not self._loading:
             self.controller.set_break_interval(value)
+
+    def _on_focus_setting(self, key: str, value: int | bool) -> None:
+        if not self._loading:
+            self.controller.set_focus_setting(key, value)
+
+    def refresh_focus_status(self) -> None:
+        focus = getattr(self.controller, "_focus", None)
+        if focus is None:
+            self.focus_status_label.setText("Focus timer unavailable")
+            self.focus_today_label.clear()
+            self.focus_history_label.clear()
+            return
+        state = focus.state
+        if self._shown_focus_kind is not state.kind:
+            index = self.focus_kind_combo.findData(state.kind)
+            if index >= 0:
+                self.focus_kind_combo.setCurrentIndex(index)
+            self._shown_focus_kind = state.kind
+        remaining = format_duration(focus.remaining_seconds())
+        self.focus_status_label.setText(
+            f"{kind_label(state.kind)} · {remaining} · {state.status.value}"
+        )
+        today_minutes = focus.today_seconds() // 60
+        self.focus_today_label.setText(
+            f"Today: {today_minutes} focused minutes · "
+            f"{state.completed_focus_sessions} completed sessions"
+        )
+        history = focus.recent_history(7)
+        self.focus_history_label.setText(
+            "   ".join(
+                f"{day.strftime('%a')}: {seconds // 60}m" for day, seconds in history
+            )
+        )
+        stopped = state.status is FocusStatus.STOPPED
+        running = state.status is FocusStatus.RUNNING
+        paused = state.status is FocusStatus.PAUSED
+        self.focus_kind_combo.setEnabled(stopped)
+        self.focus_start_button.setEnabled(stopped)
+        self.focus_pause_button.setEnabled(running)
+        self.focus_resume_button.setEnabled(paused)
+        self.focus_skip_button.setEnabled(running or paused)
+        self.focus_stop_button.setEnabled(running or paused)
 
     def _accept(self) -> None:
         self.controller.save_config()

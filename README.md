@@ -5,7 +5,8 @@ Tiny creatures that live on your Ubuntu desktop.
 **Bolt** is a soft-edged desktop robot with a large rounded screen face, two
 luminous eyes, a compact white shell and oversized boots. It walks around,
 dances on your browser's search bar, hangs out near your terminal prompt,
-investigates your cursor, and **looks after you** with gentle wellness reminders.
+investigates your cursor, and **looks after you** with gentle wellness reminders
+and a fully local focus timer.
 **Boo-ombastic** the ghost and **Mochi** the original blob-cat remain available.
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
@@ -34,6 +35,11 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Reminders arrive with a dancing Boo, a speech bubble, themed particles
   (water droplets, hearts, notes), a gentle chime and a card with
   **Done** / **Snooze 10m** buttons; snoozed reminders come back on time
+- **Focus timer**: configurable focus, short-break and long-break sessions with start, pause, resume, skip and stop controls in Preferences, the tray and CLI
+- Active or paused focus sessions survive restarts; completed focus sessions are
+  recorded locally with a compact seven-day history and daily totals
+- Bolt shows distinct focus/break eyes, a live timer badge and a completion
+  celebration; completion alerts respect quiet hours, fullscreen and DND
 - Eyes follow the cursor; the buddy chases it when playful
 - Drag & throw with real physics; double-click for a happy hop; `Ctrl`+wheel to resize
 - Right-click menu and a system-tray icon (GNOME AppIndicator)
@@ -87,6 +93,7 @@ Then:
 | Resize | `Ctrl` + mouse wheel |
 | Change character | Tray → Character → Bolt / Boo-ombastic / Mochi |
 | Wellness reminders | Tray → Reminders (on/off, chime, Water now, Stretch now, Upcoming…) |
+| Focus timer | Tray → Focus, Preferences → Focus, or `desktop-buddy focus start` |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
 ### Command line
@@ -98,6 +105,8 @@ desktop-buddy character robot|ghost|mochi  # switch characters
 desktop-buddy reminders status          # next reminders, in order
 desktop-buddy reminders on|off          # pause/resume wellness reminders
 desktop-buddy remind water              # fire a reminder now (water/lunch/break/…)
+desktop-buddy focus start [focus|short-break|long-break]
+desktop-buddy focus pause|resume|skip|stop|status
 desktop-buddy click-through on|off     # let clicks pass through to apps below
 desktop-buddy autostart on|off|status
 desktop-buddy --diagnose               # environment/support report
@@ -115,7 +124,7 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `schema_version` | `2` | Persisted-format version used for automatic upgrades |
+| `schema_version` | `3` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
@@ -141,7 +150,17 @@ but hand-editable too):
 | `active_start` / `active_end` | `"09:00"` / `"22:30"` | Window in which interval reminders may fire |
 | `reminder_grace_minutes` | `45` | How late a missed scheduled reminder may still fire |
 | `snooze_minutes` | `10` | Default snooze length on the reminder card |
+| `focus_minutes` | `25` | Length of a focus session (1–180 minutes) |
+| `short_break_minutes` | `5` | Length of a short break (1–60 minutes) |
+| `long_break_minutes` | `15` | Length of a long break (1–120 minutes) |
+| `long_break_every` | `4` | Completed focus sessions between long breaks |
+| `focus_respect_quiet_hours` | `true` | Suppress completion alerts outside active hours |
+| `focus_suppress_fullscreen` | `true` | Suppress completion alerts over fullscreen apps when detection is available |
 | `position_x` | auto | Last position on screen |
+
+Live focus state and history are stored separately in
+`~/.local/state/desktop-buddy/focus.json`. The file is versioned, local-only and
+restores running or paused sessions after restart.
 
 ## Performance
 
@@ -161,7 +180,7 @@ Summary:
 The window is only ~112 × 128 logical pixels, so even where it overlaps other
 windows it blocks almost nothing.
 
-The reminder scheduler wakes up every 20 seconds and costs effectively nothing.
+The reminder scheduler wakes every 20 seconds. The focus controller checks its absolute deadline once per second; neither scheduler is tied to animation FPS.
 
 ## Troubleshooting
 
@@ -210,6 +229,12 @@ tail -f ~/.local/state/desktop-buddy/desktop-buddy.log
 - No chime? Check that the system has an available audio output. Reminder audio
   now uses Qt Multimedia and does not require an external player command.
 
+### Focus completion did not pop up
+
+- Run `desktop-buddy focus status` to confirm the session completed and view today's total.
+- Completion alerts are intentionally suppressed during do-not-disturb, outside `active_start` / `active_end` when quiet-hours protection is enabled, and over fullscreen applications when the platform can detect them.
+- The completion and daily total are still saved when an alert is suppressed.
+
 ## Uninstall
 
 ```bash
@@ -233,6 +258,7 @@ desktop_buddy/
     base.py          backend contract, portable paths/audio/IPC identity
     linux.py         X11 probing, workspace behavior, battery and autostart
   wellness.py       meal/water/break schedule + snooze logic (pure, unit-tested)
+  focus.py          focus/break state machine, persistence and history (pure)
   toast.py          reminder card with Done/Snooze next to the buddy
   sound.py          generated chime waveforms (played through the backend)
   prefs.py          preferences dialog + live preview
@@ -254,13 +280,20 @@ tools/preview.py    renders a pose/theme sheet to PNG
 ./run.sh --diagnose
 ```
 
-The behaviour engine (`behavior.py`) has no Qt dependency, so the physics and
-state machine can be tested headlessly.
+The behaviour, wellness and focus engines have no Qt dependency, so their state
+machines can be tested headlessly.
 
 The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
+
+**1.4.0**
+- Added a local focus timer with configurable focus, short-break and long-break durations, long-break cadence, and start/pause/resume/skip/stop actions.
+- Added Focus controls to Preferences, the tray, CLI and single-instance IPC.
+- Running and paused sessions restore after restart using versioned local state; completed focus sessions feed daily totals and a seven-day history.
+- Bolt now has focus/break face states, a live timer badge and a completion celebration that honors reduced motion and silent mode.
+- Completion notifications respect do-not-disturb, configured active hours and detectable fullscreen applications.
 
 **1.3.0**
 - New default character: **Bolt**, a soft-edged desktop companion with a large
