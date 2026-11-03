@@ -21,13 +21,14 @@ Guiding product rules:
 
 ## 2. Current development status
 
-Last verified: 2026-11-03 on branch `main` at commit `87de701` plus the
-uncommitted Phase 6 and Phase 7 preview implementation described below.
+Last verified: 2026-11-03 on branch `main` at commit `609d6ca` plus the
+uncommitted Phase 7 signed-release and validation tooling described below.
 
 Repository state at handoff:
 
 - `main` is synchronized with `origin/main`.
-- The working tree contains the uncommitted Phase 6 and Phase 7 preview and their
+- The working tree contains the uncommitted protected Windows signing workflow,
+  fail-closed build checks, Windows validation-report tool, and their
   documentation/tests; preserve it unless the user explicitly asks to commit or
   discard it.
 - Phase 0 is complete: stable baseline, migrations, CI, renderer/CLI/IPC tests, screenshots, and performance measurements.
@@ -49,7 +50,7 @@ Verification at handoff:
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
-- Unit/smoke tests: 154 passing.
+- Unit/smoke tests: 157 passing.
 - Source distribution and wheel build: passing.
 
 The next roadmap work is Phase 7 Steps 3, 6, and 8: run the signed Windows installer through the physical/VM DPI and lifecycle matrix in `docs/WINDOWS.md`. Do not mark Windows fully supported from Linux-hosted tests alone.
@@ -159,7 +160,7 @@ Do not hard-code these paths in application logic. Always use backend paths.
 Config rules:
 
 - `Config` is a dataclass in `config.py`.
-- Current config schema version is `5`.
+- Current config schema version is `6`.
 - `Config.save()` writes a temporary file and atomically replaces the target.
 - Unknown JSON keys are ignored when loading.
 - Values are normalized and clamped after migration.
@@ -519,6 +520,12 @@ deliberately incomplete until signed artifacts run on Windows 10 and Windows 11.
   should be preserved or purged.
 - `scripts/build_windows.ps1` optionally signs both executable and installer with
   SHA-256 and a trusted timestamp using protected environment credentials.
+- `.github/workflows/windows-release.yml` provides a manually dispatched,
+  environment-protected signing path that verifies both Authenticode signatures,
+  uploads signed artifacts, and removes temporary certificate material.
+- `scripts/validate_windows_release.ps1` verifies downloaded signed artifacts,
+  records machine/display evidence, and generates the manual Windows 10/11 DPI,
+  services, IPC, lifecycle, and security checklist used for release approval.
 
 ### CI and validation
 

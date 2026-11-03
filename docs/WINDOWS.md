@@ -67,6 +67,22 @@ signs the final installer, using SHA-256 and a trusted timestamp. Release
 automation must inject the certificate/password as protected secrets and delete
 temporary certificate material after signing.
 
+For protected CI signing, configure a GitHub environment named
+`windows-release` with required reviewers and these environment secrets:
+
+- `WINDOWS_SIGNING_CERT_BASE64`: base64-encoded contents of the production PFX;
+- `WINDOWS_SIGNING_PASSWORD`: the PFX password.
+
+Then manually run the **Windows signed release** workflow. It decodes the PFX
+only into the hosted runner's temporary directory, builds and signs the
+standalone executable and installer, verifies both Authenticode signatures with
+PowerShell and `signtool`, uploads the `desktop-buddy-windows-signed` artifact,
+includes a CI-machine preflight report, and removes the temporary PFX even if an
+earlier step fails. Download the artifact into the controlled release environment
+before its 30-day retention period expires. The workflow does not publish a
+GitHub release automatically. Its preflight report proves the validation script
+ran successfully, but does not replace the Windows 10/11 manual reports.
+
 ## Release validation matrix
 
 Do not check the remaining Phase 7 roadmap gates until these tests pass.
@@ -86,3 +102,21 @@ Do not check the remaining Phase 7 roadmap gates until these tests pass.
 Record the OS build, hardware/VM, display scaling, test result, and any workaround
 in the release notes. CI's offscreen tests and unsigned artifact prove packaging
 repeatability, not real compositor, tray, notification, or DPI behavior.
+
+On each Windows 10/11 validation machine, generate a machine-specific report
+from the downloaded signed artifact before beginning the manual checks:
+
+```powershell
+.\scripts\validate_windows_release.ps1 `
+  -ApplicationPath ".\DesktopBuddy\DesktopBuddy.exe" `
+  -InstallerPath ".\DesktopBuddy-1.8.0-setup.exe" `
+  -OutputPath ".\validation\windows-11-23h2-150-percent.md"
+```
+
+The script fails unless both artifacts have valid Authenticode signatures and
+the packaged executable passes a `--version` smoke launch. It records the OS,
+build, hardware, display adapter, current DPI evidence, signer, and timestamp
+signer, then creates checklists matching the matrix above. Complete the report
+on the test machine and retain the Windows 10 and Windows 11 reports with the
+release notes. A generated checklist is evidence scaffolding, not a passing
+result; every row must be exercised and marked by the tester.

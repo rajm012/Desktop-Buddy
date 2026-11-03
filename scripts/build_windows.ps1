@@ -7,8 +7,16 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
+function Assert-LastExitCode([string]$Step) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE."
+    }
+}
+
 python -m pip install -e ".[windows]"
+Assert-LastExitCode "Installing Windows build dependencies"
 python -m PyInstaller --noconfirm --clean desktop-buddy-windows.spec
+Assert-LastExitCode "Building the standalone application"
 
 $Executable = Join-Path $ProjectRoot "dist\DesktopBuddy\DesktopBuddy.exe"
 
@@ -22,6 +30,11 @@ function Invoke-CodeSigning([string]$Path) {
     $SignTool = if ($env:SIGNTOOL_PATH) { $env:SIGNTOOL_PATH } else { "signtool.exe" }
     & $SignTool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com `
         /f $env:WINDOWS_SIGNING_CERT /p $env:WINDOWS_SIGNING_PASSWORD $Path
+    Assert-LastExitCode "Signing $Path"
+    $Signature = Get-AuthenticodeSignature $Path
+    if ($Signature.Status -ne "Valid") {
+        throw "Authenticode verification failed for ${Path}: $($Signature.StatusMessage)"
+    }
 }
 
 Invoke-CodeSigning $Executable
@@ -32,8 +45,12 @@ if ($Installer) {
         throw "Inno Setup 6 was not found at $Inno"
     }
     & $Inno "packaging\windows\DesktopBuddy.iss"
+    Assert-LastExitCode "Building the Windows installer"
     $Setup = Get-ChildItem "dist\installer\DesktopBuddy-*-setup.exe" |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
+    if (-not $Setup) {
+        throw "Inno Setup completed without producing an installer."
+    }
     Invoke-CodeSigning $Setup.FullName
 }

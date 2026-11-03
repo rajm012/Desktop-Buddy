@@ -228,7 +228,8 @@ Goal: ship a supported Windows desktop version.
 5. [x] Disable or adapt features that behave differently under exclusive fullscreen.
 6. [ ] Create a signed installer and uninstall flow.
    - Installer and explicit preserve/purge uninstall flow are implemented.
-   - Release signing still requires the production certificate and timestamped build.
+   - A protected release workflow builds, timestamp-signs, verifies, and uploads signed artifacts while removing temporary certificate material.
+   - The gate remains open until that workflow runs with the production certificate and the resulting artifact passes the release matrix.
 7. [x] Add Windows CI for tests and packaged builds.
 8. [ ] Test Windows 10 and Windows 11 on physical or virtual machines.
 
@@ -253,8 +254,7 @@ Goal: ship a supported macOS desktop version.
 1. Implement the macOS backend using AppKit, Quartz and PyObjC where required.
 2. Use a floating panel/window level that does not steal focus.
 3. Implement click-through and active-application detection.
-4. Add guided Accessibility or Screen Recording permission requests only for
-   features that require them.
+4. Add guided Accessibility or Screen Recording permission requests only for features that require them.
 5. Implement login-item support using the current Apple-recommended API.
 6. Test Spaces, multiple displays, Retina scaling and fullscreen applications.
 7. Build, sign and notarize the `.app` bundle and installer image.
@@ -276,8 +276,7 @@ Goal: provide an honest, useful experience on modern Linux desktops.
 ### Steps
 
 1. Define a reduced Wayland mode using only standard Qt capabilities.
-2. Disable unsupported arbitrary positioning, global click-through and window
-   inspection with clear UI explanations.
+2. Disable unsupported arbitrary positioning, global click-through and window inspection with clear UI explanations.
 3. Investigate layer-shell support for compatible compositors.
 4. Prototype an optional GNOME extension for positioning and active-window data.
 5. Evaluate KDE-specific integration separately.

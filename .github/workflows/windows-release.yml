@@ -1,0 +1,106 @@
+name: Windows signed release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-signed-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    environment: windows-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and packaging tools
+        run: python -m pip install -e ".[dev,windows]"
+      - name: Prepare signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
+            throw "WINDOWS_SIGNING_CERT_BASE64 is not configured."
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "desktop-buddy-signing.pfx"
+          try {
+            $certificate = [Convert]::FromBase64String(
+              $env:WINDOWS_SIGNING_CERT_BASE64
+            )
+          } catch {
+            throw "WINDOWS_SIGNING_CERT_BASE64 is not valid base64."
+          }
+          [IO.File]::WriteAllBytes($certificatePath, $certificate)
+          "WINDOWS_SIGNING_CERT=$certificatePath" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $signTool = Get-ChildItem $kitsRoot -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\signtool\.exe$' |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) {
+            throw "A 64-bit Windows SDK signtool.exe was not found."
+          }
+          "SIGNTOOL_PATH=$($signTool.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build and sign installer
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: .\scripts\build_windows.ps1 -Installer -Sign
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "dist\installer\DesktopBuddy-*-setup.exe" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          $targets = @(
+            "dist\DesktopBuddy\DesktopBuddy.exe",
+            $installer.FullName
+          )
+          foreach ($target in $targets) {
+            $signature = Get-AuthenticodeSignature $target
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid signature for ${target}: $($signature.StatusMessage)"
+            }
+            & $env:SIGNTOOL_PATH verify /pa /all $target
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool verification failed for $target."
+            }
+          }
+      - name: Generate CI preflight report
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "dist\installer\DesktopBuddy-*-setup.exe" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          .\scripts\validate_windows_release.ps1 `
+            -ApplicationPath "dist\DesktopBuddy\DesktopBuddy.exe" `
+            -InstallerPath $installer.FullName `
+            -OutputPath "dist\validation\windows-ci-preflight.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-buddy-windows-signed
+          path: |
+            dist/DesktopBuddy/**
+            dist/installer/*.exe
+            dist/validation/*.md
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGNING_CERT) {
+            Remove-Item -LiteralPath $env:WINDOWS_SIGNING_CERT `
+              -Force -ErrorAction SilentlyContinue
+          }

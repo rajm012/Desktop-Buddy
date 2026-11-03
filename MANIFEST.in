@@ -2,4 +2,4 @@ include BENCHMARKS.md
 include desktop-buddy-windows.spec
 recursive-include docs *.md *.png
 recursive-include packaging/windows *.py *.manifest *.iss
-include scripts/build_windows.ps1
+recursive-include scripts *.ps1
