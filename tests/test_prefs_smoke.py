@@ -13,7 +13,12 @@ from desktop_buddy.config import Config  # noqa: E402
 from desktop_buddy.focus import FocusEngine, FocusSettings  # noqa: E402
 from desktop_buddy.platforms.base import GenericPlatformBackend  # noqa: E402
 from desktop_buddy.platforms.linux import LinuxBackend  # noqa: E402
-from desktop_buddy.prefs import OnboardingDialog, PreferencesDialog  # noqa: E402
+from desktop_buddy.prefs import (  # noqa: E402
+    ActionEditDialog,
+    OnboardingDialog,
+    PreferencesDialog,
+    ReminderEditDialog,
+)
 
 
 class _StubController:
@@ -45,8 +50,9 @@ class PreferencesSmokeTests(unittest.TestCase):
         dialog.show()
         self.app.processEvents()
         self.assertTrue(dialog.check_reminders is not None)
-        self.assertIn("lunch", dialog.meal_widgets)
-        self.assertEqual(dialog.water_slider.minimum(), 10)
+        self.assertGreaterEqual(dialog.reminder_list.count(), 7)
+        self.assertTrue(dialog.reminder_add_button.isEnabled())
+        self.assertTrue(dialog.action_add_button.isEnabled())
         self.assertEqual(dialog.focus_minutes.value(), 25)
         self.assertTrue(dialog.focus_start_button.isEnabled())
         self.assertFalse(dialog.check_click.isEnabled())
@@ -56,6 +62,33 @@ class PreferencesSmokeTests(unittest.TestCase):
             list(PreferencesDialog.TAB_NAMES),
         )
         self.assertLessEqual(dialog.height(), 700)
+        dialog.close()
+
+    def test_reminder_editor_parses_local_schedule(self) -> None:
+        dialog = ReminderEditDialog(_StubController())
+        dialog.title_edit.setText("Stand up")
+        dialog.schedule_edit.setText("weekdays at 9")
+        definition = dialog.definition()
+        self.assertEqual(definition["recurrence"], "weekdays")
+        self.assertEqual(definition["time"], "09:00")
+        self.assertEqual(definition["weekdays"], [0, 1, 2, 3, 4])
+        dialog.close()
+
+    def test_editing_command_target_clears_prior_approval(self) -> None:
+        dialog = ActionEditDialog(
+            {
+                "id": "trusted",
+                "name": "Trusted",
+                "type": "command",
+                "target": "printf ok",
+                "enabled": True,
+                "approved": True,
+            }
+        )
+        self.assertTrue(dialog.approve_check.isChecked())
+        dialog.target_edit.setText("printf changed")
+        dialog._target_changed(dialog.target_edit.text())  # noqa: SLF001
+        self.assertFalse(dialog.approve_check.isChecked())
         dialog.close()
 
     def test_dialog_survives_theme_and_species_change(self) -> None:

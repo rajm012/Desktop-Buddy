@@ -6,13 +6,14 @@ import os
 import time
 import unittest
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtNetwork import QLocalSocket  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from desktop_buddy.actions import ActionDefinition, ActionRegistry, ActionType  # noqa: E402
 from desktop_buddy.app import Controller, LocalCommandServer, build_parser  # noqa: E402
 from desktop_buddy.config import Config  # noqa: E402
 from desktop_buddy.focus import (  # noqa: E402
@@ -26,6 +27,7 @@ from desktop_buddy.platforms.base import (  # noqa: E402
     Capability,
     WindowInfo,
 )
+from desktop_buddy.wellness import HistoryStatus, WellnessEngine  # noqa: E402
 
 
 class _ToggleBackend:
@@ -99,6 +101,69 @@ class _FocusControllerHarness:
         return None
 
 
+class _ReminderWindow:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def say(self, message: str, _seconds: float) -> None:
+        self.messages.append(message)
+
+
+class _ReminderControllerHarness:
+    handle_command = Controller.handle_command
+    _check_reminders = Controller._check_reminders
+    _toast_done = Controller._toast_done
+    _toast_dismiss = Controller._toast_dismiss
+    reminders_summary = Controller.reminders_summary
+    reminder_history_summary = Controller.reminder_history_summary
+    add_reminder = Controller.add_reminder
+    save_reminder_definition = Controller.save_reminder_definition
+    remove_reminder = Controller.remove_reminder
+    mark_reminder_done = Controller.mark_reminder_done
+    snooze_reminder = Controller.snooze_reminder
+    actions_summary = Controller.actions_summary
+    run_action = Controller.run_action
+    _unique_config_id = staticmethod(Controller._unique_config_id)
+
+    def __init__(self) -> None:
+        scheduled = datetime.now() - timedelta(minutes=1)
+        self.config = Config(
+            active_start="00:00",
+            active_end="23:59",
+            reminders=[
+                {
+                    "id": "test",
+                    "title": "Test",
+                    "kind": "custom",
+                    "icon": "⏰",
+                    "message": "Test reminder",
+                    "recurrence": "one_time",
+                    "one_time_at": scheduled.isoformat(),
+                    "enabled": True,
+                    "urgent": False,
+                    "snooze_minutes": 10,
+                }
+            ],
+        )
+        self._wellness = WellnessEngine(self.config)
+        self._actions = ActionRegistry()
+        self.window = _ReminderWindow()
+        self.tray = _RefreshTarget()
+        self.fired = []
+
+    def _fire_reminder(self, reminder) -> None:  # noqa: ANN001
+        self.fired.append(reminder)
+
+    def _save_wellness(self) -> None:
+        self._wellness.dirty = False
+
+    def _rebuild_wellness(self) -> None:
+        self._wellness = WellnessEngine(self.config, self._wellness.state)
+
+    def _schedule_save(self) -> None:
+        return None
+
+
 class _FullscreenProbe(ActiveWindowProbe):
     @property
     def available(self) -> bool:
@@ -155,6 +220,16 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.command, "focus")
         self.assertEqual(args.action, "start")
         self.assertEqual(args.kind, "short-break")
+
+    def test_phase_four_commands_parse(self) -> None:
+        reminder = self.parser.parse_args(
+            ["reminders", "add", "Stand up", "weekdays at 9"]
+        )
+        self.assertEqual(reminder.value, "add")
+        self.assertEqual(reminder.title, "Stand up")
+        self.assertEqual(reminder.schedule, "weekdays at 9")
+        action = self.parser.parse_args(["actions", "run", "dance"])
+        self.assertEqual((action.action, action.action_id), ("run", "dance"))
 
     def test_global_flags_parse(self) -> None:
         args = self.parser.parse_args(["--diagnose", "--reset-config", "-v"])
@@ -224,6 +299,55 @@ class FocusControllerTests(unittest.TestCase):
         self.assertFalse(
             Controller._focus_attention_allowed(harness, datetime(2026, 11, 3, 12, 0))
         )
+
+
+class ReminderControllerTests(unittest.TestCase):
+    def test_due_reminder_is_not_marked_done_before_user_response(self) -> None:
+        harness = _ReminderControllerHarness()
+        harness._check_reminders()
+        self.assertEqual([item.id for item in harness.fired], ["test"])
+        self.assertIn("test", harness._wellness.state.last_triggered)
+        self.assertEqual(harness._wellness.recent_history(), [])
+
+        harness._toast_done(harness.fired[0])
+        self.assertEqual(
+            harness._wellness.recent_history()[0].status, HistoryStatus.DONE
+        )
+
+    def test_dismiss_records_missed_status(self) -> None:
+        harness = _ReminderControllerHarness()
+        harness._check_reminders()
+        harness._toast_dismiss(harness.fired[0])
+        self.assertEqual(
+            harness._wellness.recent_history()[0].status, HistoryStatus.MISSED
+        )
+
+    def test_reminders_are_managed_through_quoted_ipc_commands(self) -> None:
+        harness = _ReminderControllerHarness()
+        reply = harness.handle_command('reminders add "Stand up" "weekdays at 9"')
+        self.assertEqual(reply, "reminder added: stand-up")
+        self.assertIn("Stand up", harness.handle_command("reminders list"))
+        self.assertEqual(
+            harness.handle_command("reminders snooze stand-up 15"),
+            "reminder snoozed: stand-up",
+        )
+        self.assertEqual(
+            harness.handle_command("reminders remove stand-up"),
+            "reminder removed: stand-up",
+        )
+
+    def test_ipc_never_runs_an_unapproved_command(self) -> None:
+        harness = _ReminderControllerHarness()
+        calls: list[list[str]] = []
+        action = ActionDefinition(
+            "unsafe", "Unsafe", ActionType.COMMAND, "printf unsafe", approved=False
+        )
+        harness._actions = ActionRegistry(
+            [action], run_command=lambda parts: calls.append(parts) or True
+        )
+        reply = harness.handle_command("actions run unsafe")
+        self.assertIn("not approved", reply)
+        self.assertEqual(calls, [])
 
 
 class LocalIpcTests(unittest.TestCase):

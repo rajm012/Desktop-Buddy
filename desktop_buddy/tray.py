@@ -109,6 +109,9 @@ class BuddyTray(QObject):
         reminders_menu.addAction("Stretch now", lambda: controller.remind_now("break"))
         reminders_menu.addAction("Upcoming…", controller.show_reminders)
 
+        self.quick_actions_menu = menu.addMenu("Quick actions")
+        self._refresh_quick_actions()
+
         self.focus_menu = menu.addMenu("Focus")
         self.act_focus_status = self.focus_menu.addAction("Ready")
         self.act_focus_status.setEnabled(False)
@@ -216,6 +219,7 @@ class BuddyTray(QObject):
         self.act_perch.setChecked(config.perch_on_windows)
         self.act_reminders.setChecked(config.reminders_enabled)
         self.act_chime.setChecked(config.reminder_sound)
+        self._refresh_quick_actions()
         self.act_autostart.setChecked(self.controller.autostart_active())
         focus = self.controller._focus  # noqa: SLF001 - tray is a controller view
         focus_status = focus.state.status
@@ -242,6 +246,36 @@ class BuddyTray(QObject):
             action.setChecked(config.theme == key)
         for action, key in self._species_actions:
             action.setChecked(config.species == key)
+
+    def _refresh_quick_actions(self) -> None:
+        if not hasattr(self, "quick_actions_menu"):
+            return
+        self.quick_actions_menu.clear()
+        builtins = (
+            ("Dance", "dance"),
+            ("Show buddy", "show-buddy"),
+            ("Open settings", "open-settings"),
+            ("Start focus", "start-focus"),
+            ("Stop focus", "stop-focus"),
+        )
+        for label, action_id in builtins:
+            self.quick_actions_menu.addAction(
+                label,
+                lambda _checked=False, key=action_id: self.controller.run_action(key),
+            )
+        configured = self.controller._actions.list_actions()  # noqa: SLF001
+        if configured:
+            self.quick_actions_menu.addSeparator()
+        for definition in configured:
+            action = self.quick_actions_menu.addAction(
+                definition.name,
+                lambda _checked=False, key=definition.id: self.controller.run_action(
+                    key
+                ),
+            )
+            if definition.type.value == "command" and not definition.approved:
+                action.setEnabled(False)
+                action.setToolTip("Approve this command explicitly in Preferences.")
 
     def show_message(self, title: str, message: str) -> None:
         if self.icon is not None and self.icon.isVisible():

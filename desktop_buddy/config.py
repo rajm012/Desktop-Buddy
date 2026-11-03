@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, fields
+from copy import deepcopy
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +99,123 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
-CURRENT_CONFIG_SCHEMA_VERSION = 3
+CURRENT_CONFIG_SCHEMA_VERSION = 4
+
+
+def default_reminders() -> list[dict[str, Any]]:
+    """General reminder definitions used for new installs and v3 migration."""
+    return [
+        {
+            "id": "breakfast",
+            "title": "Breakfast",
+            "kind": "meal",
+            "icon": "🥞",
+            "message": "Breakfast time! Don't skip it. 🥞",
+            "recurrence": "daily",
+            "time": "09:00",
+            "enabled": True,
+            "urgent": True,
+            "snooze_minutes": 15,
+        },
+        {
+            "id": "lunch",
+            "title": "Lunch",
+            "kind": "meal",
+            "icon": "🍛",
+            "message": "Lunch time! Step away from the screen. 🍛",
+            "recurrence": "daily",
+            "time": "13:30",
+            "enabled": True,
+            "urgent": True,
+            "snooze_minutes": 15,
+        },
+        {
+            "id": "snack",
+            "title": "Snack",
+            "kind": "meal",
+            "icon": "🍎",
+            "message": "Little snack o'clock? Fruit or nuts would be lovely. 🍎",
+            "recurrence": "daily",
+            "time": "16:30",
+            "enabled": True,
+            "urgent": True,
+            "snooze_minutes": 15,
+        },
+        {
+            "id": "dinner",
+            "title": "Dinner",
+            "kind": "meal",
+            "icon": "🍽",
+            "message": "Dinner time! Close the laptop and eat properly. 🍽",
+            "recurrence": "daily",
+            "time": "21:00",
+            "enabled": True,
+            "urgent": True,
+            "snooze_minutes": 15,
+        },
+        {
+            "id": "winddown",
+            "title": "Wind down",
+            "kind": "winddown",
+            "icon": "🌙",
+            "message": "It's getting late — time to wind down. 🌙",
+            "recurrence": "daily",
+            "time": "23:00",
+            "enabled": True,
+            "urgent": True,
+            "snooze_minutes": 20,
+        },
+        {
+            "id": "water",
+            "title": "Water break",
+            "kind": "water",
+            "icon": "💧",
+            "message": "Water break! Take a sip. 💧",
+            "recurrence": "interval",
+            "interval_minutes": 45,
+            "enabled": True,
+            "urgent": False,
+            "snooze_minutes": 10,
+        },
+        {
+            "id": "break",
+            "title": "Stretch break",
+            "kind": "break",
+            "icon": "🧘",
+            "message": "Stand up, stretch, and look far away for 20 seconds. 🧘",
+            "recurrence": "interval",
+            "interval_minutes": 60,
+            "enabled": True,
+            "urgent": False,
+            "snooze_minutes": 10,
+        },
+    ]
+
+
+def _legacy_reminders(data: dict[str, Any]) -> list[dict[str, Any]]:
+    reminders = default_reminders()
+    daily_fields = {
+        "breakfast": ("breakfast_enabled", "breakfast_time"),
+        "lunch": ("lunch_enabled", "lunch_time"),
+        "snack": ("snack_enabled", "snack_time"),
+        "dinner": ("dinner_enabled", "dinner_time"),
+        "winddown": ("winddown_enabled", "winddown_time"),
+    }
+    for reminder in reminders:
+        reminder_id = reminder["id"]
+        if reminder_id in daily_fields:
+            enabled_field, time_field = daily_fields[reminder_id]
+            reminder["enabled"] = bool(data.get(enabled_field, True))
+            reminder["time"] = _valid_time(
+                data.get(time_field), str(reminder.get("time", "09:00"))
+            )
+        elif reminder_id == "water":
+            reminder["enabled"] = bool(data.get("water_enabled", True))
+            reminder["interval_minutes"] = data.get("water_interval_minutes", 45)
+        elif reminder_id == "break":
+            reminder["enabled"] = bool(data.get("break_enabled", True))
+            reminder["interval_minutes"] = data.get("break_interval_minutes", 60)
+    return reminders
 
 
 def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
@@ -130,6 +247,11 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("focus_respect_quiet_hours", True)
         migrated.setdefault("focus_suppress_fullscreen", True)
         version = 3
+
+    if version < 4:
+        migrated.setdefault("reminders", _legacy_reminders(migrated))
+        migrated.setdefault("actions", [])
+        version = 4
 
     migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
     return migrated
@@ -193,6 +315,8 @@ class Config:
     active_end: str = "22:30"
     reminder_grace_minutes: int = 45
     snooze_minutes: int = 10
+    reminders: list[dict[str, Any]] = field(default_factory=default_reminders)
+    actions: list[dict[str, Any]] = field(default_factory=list)
     focus_minutes: int = 25
     short_break_minutes: int = 5
     long_break_minutes: int = 15
@@ -228,7 +352,7 @@ class Config:
 
     # ------------------------------------------------------------------ save
     def to_dict(self) -> dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        return {f.name: deepcopy(getattr(self, f.name)) for f in fields(self)}
 
     def save(self, path: Path | None = None) -> None:
         path = path or CONFIG_PATH
@@ -326,6 +450,34 @@ class Config:
             self.snooze_minutes = int(_clamp(int(self.snooze_minutes), 1, 60))
         except (TypeError, ValueError):
             self.snooze_minutes = 10
+        if not isinstance(self.reminders, list):
+            self.reminders = default_reminders()
+        else:
+            from .wellness import Reminder
+
+            normalized_reminders: list[dict[str, Any]] = []
+            reminder_ids: set[str] = set()
+            for item in self.reminders:
+                reminder = Reminder.from_dict(item)
+                if reminder is None or reminder.id in reminder_ids:
+                    continue
+                reminder_ids.add(reminder.id)
+                normalized_reminders.append(reminder.to_dict())
+            self.reminders = normalized_reminders
+        if not isinstance(self.actions, list):
+            self.actions = []
+        else:
+            from .actions import ActionDefinition
+
+            normalized_actions: list[dict[str, Any]] = []
+            action_ids: set[str] = set()
+            for item in self.actions:
+                action = ActionDefinition.from_dict(item)
+                if action is None or action.id in action_ids:
+                    continue
+                action_ids.add(action.id)
+                normalized_actions.append(action.to_dict())
+            self.actions = normalized_actions
         try:
             self.focus_minutes = int(_clamp(int(self.focus_minutes), 1, 180))
         except (TypeError, ValueError):

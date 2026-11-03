@@ -5,8 +5,8 @@ Tiny creatures that live on your Ubuntu desktop.
 **Bolt** is a soft-edged desktop robot with a large rounded screen face, two
 luminous eyes, a compact white shell and oversized boots. It walks around,
 dances on your browser's search bar, hangs out near your terminal prompt,
-investigates your cursor, and **looks after you** with gentle wellness reminders
-and a fully local focus timer.
+investigates your cursor, and **looks after you** with customizable local
+reminders, safe quick actions, and a fully local focus timer.
 **Boo-ombastic** the ghost and **Mochi** the original blob-cat remain available.
 
 Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
@@ -29,12 +29,15 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
   the screen, top edge, on top of another window
 - **Three characters**: Bolt the articulated robot, Boo-ombastic the ghost and
   Mochi the cat — switch live from the tray or with `desktop-buddy character robot|ghost|mochi`
-- **Wellness reminders**: breakfast 09:00, lunch 13:30, optional snack 16:30,
-  dinner 21:00, wind-down 23:00, water every 45 min and a stretch break every
-  60 min (both only during your active hours, 09:00–22:30 by default)
+- **Custom reminders**: create one-time, daily, weekday, or interval schedules
+  using local phrases such as `in 20 minutes`, `weekdays at 9`, and
+  `every 2 hours`; existing wellness schedules migrate automatically
 - Reminders arrive with a dancing Boo, a speech bubble, themed particles
   (water droplets, hearts, notes), a gentle chime and a card with
-  **Done** / **Snooze 10m** buttons; snoozed reminders come back on time
+  **Done** / **Snooze 10m** buttons; done, missed, and snoozed outcomes are kept
+  in local history, and non-urgent reminders respect active hours
+- **Quick actions**: attach safe built-ins, application launches, URLs, or an
+  explicitly approved command to a reminder; command execution never uses a shell
 - **Focus timer**: configurable focus, short-break and long-break sessions with start, pause, resume, skip and stop controls in Preferences, the tray and CLI
 - Active or paused focus sessions survive restarts; completed focus sessions are
   recorded locally with a compact seven-day history and daily totals
@@ -92,7 +95,8 @@ Then:
 | Menu | Right-click it, or click the tray icon |
 | Resize | `Ctrl` + mouse wheel |
 | Change character | Tray → Character → Bolt / Boo-ombastic / Mochi |
-| Wellness reminders | Tray → Reminders (on/off, chime, Water now, Stretch now, Upcoming…) |
+| Reminders | Preferences → Reminders, tray → Reminders, or the reminder CLI |
+| Quick actions | Preferences → Integrations or tray → Quick actions |
 | Focus timer | Tray → Focus, Preferences → Focus, or `desktop-buddy focus start` |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
@@ -104,7 +108,13 @@ desktop-buddy status                    # what is the buddy doing right now?
 desktop-buddy character robot|ghost|mochi  # switch characters
 desktop-buddy reminders status          # next reminders, in order
 desktop-buddy reminders on|off          # pause/resume wellness reminders
-desktop-buddy remind water              # fire a reminder now (water/lunch/break/…)
+desktop-buddy reminders list|history
+desktop-buddy reminders add "Stand up" "weekdays at 9"
+desktop-buddy reminders remove|done REMINDER_ID
+desktop-buddy reminders snooze REMINDER_ID [MINUTES]
+desktop-buddy remind REMINDER_ID         # fire any configured reminder now
+desktop-buddy actions list
+desktop-buddy actions run ACTION_ID
 desktop-buddy focus start [focus|short-break|long-break]
 desktop-buddy focus pause|resume|skip|stop|status
 desktop-buddy click-through on|off     # let clicks pass through to apps below
@@ -124,7 +134,7 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `schema_version` | `3` | Persisted-format version used for automatic upgrades |
+| `schema_version` | `4` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
@@ -144,10 +154,9 @@ but hand-editable too):
 | `perch_delay` | `1.2` | Seconds a window must stay focused before climbing |
 | `reminders_enabled` | `true` | Master switch for all wellness reminders |
 | `reminder_sound` | `true` | Play a gentle generated chime |
-| `breakfast_time` | `"09:00"` | Breakfast reminder (also `lunch_time` 13:30, `snack_time` 16:30, `dinner_time` 21:00, `winddown_time` 23:00) |
-| `water_interval_minutes` | `45` | Water reminder interval |
-| `break_interval_minutes` | `60` | Stretch reminder interval |
-| `active_start` / `active_end` | `"09:00"` / `"22:30"` | Window in which interval reminders may fire |
+| `reminders` | built-in wellness set | General reminder definitions, schedules, urgency, snooze length, and attached action IDs |
+| `actions` | `[]` | Built-in, application, URL, and approved-command quick actions |
+| `active_start` / `active_end` | `"09:00"` / `"22:30"` | Window in which non-urgent reminders may interrupt |
 | `reminder_grace_minutes` | `45` | How late a missed scheduled reminder may still fire |
 | `snooze_minutes` | `10` | Default snooze length on the reminder card |
 | `focus_minutes` | `25` | Length of a focus session (1–180 minutes) |
@@ -161,6 +170,10 @@ but hand-editable too):
 Live focus state and history are stored separately in
 `~/.local/state/desktop-buddy/focus.json`. The file is versioned, local-only and
 restores running or paused sessions after restart.
+
+Reminder runtime state and up to 500 done/missed/snoozed history entries are
+stored in `~/.local/state/desktop-buddy/reminders.json`. Reminder and focus times
+use deterministic local wall-clock values and require no network service.
 
 ## Performance
 
@@ -222,10 +235,10 @@ tail -f ~/.local/state/desktop-buddy/desktop-buddy.log
 
 ### Reminders don't fire
 - Check `desktop-buddy reminders status` for the next scheduled times.
-- Water/stretch reminders only fire between `active_start` and `active_end`
-  (default 09:00–22:30); meals fire at their fixed times.
-- If the laptop was asleep at a meal time, Boo still reminds you within the
-  grace window (45 min by default) when you come back.
+- Non-urgent reminders only interrupt between `active_start` and `active_end`
+  (default 09:00–22:30). Urgent reminders may fire outside that window.
+- After sleep, a scheduled reminder can still appear within the grace window
+  (45 min by default); otherwise it is recorded as missed.
 - No chime? Check that the system has an available audio output. Reminder audio
   now uses Qt Multimedia and does not require an external player command.
 
@@ -257,8 +270,9 @@ desktop_buddy/
   platforms/        capability interface and Linux/X11 implementation
     base.py          backend contract, portable paths/audio/IPC identity
     linux.py         X11 probing, workspace behavior, battery and autostart
-  wellness.py       meal/water/break schedule + snooze logic (pure, unit-tested)
+  wellness.py       general reminder schedules, parsing and history (pure)
   focus.py          focus/break state machine, persistence and history (pure)
+  actions.py        validated, permission-aware quick action registry (pure)
   toast.py          reminder card with Done/Snooze next to the buddy
   sound.py          generated chime waveforms (played through the backend)
   prefs.py          preferences dialog + live preview
@@ -280,13 +294,22 @@ tools/preview.py    renders a pose/theme sheet to PNG
 ./run.sh --diagnose
 ```
 
-The behaviour, wellness and focus engines have no Qt dependency, so their state
-machines can be tested headlessly.
+The behaviour, wellness, focus, and action engines have no Qt dependency, so
+their state machines and policies can be tested headlessly.
 
 The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
+
+**1.5.0**
+- Replaced fixed wellness controls with general one-time, daily, weekday, and
+  interval reminders plus local schedule phrase parsing.
+- Added done, missed, and snoozed reminder history, quiet-hours urgency rules,
+  and lossless migration from the previous wellness fields.
+- Added safe built-in/application/URL actions and command actions that require
+  explicit warning confirmation and execute without a shell.
+- Added reminder/action Preferences, tray, CLI, and single-instance IPC controls.
 
 **1.4.0**
 - Added a local focus timer with configurable focus, short-break and long-break durations, long-break cadence, and start/pause/resume/skip/stop actions.

@@ -131,6 +131,68 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.focus_respect_quiet_hours)
         self.assertTrue(config.focus_suppress_fullscreen)
 
+    def test_legacy_wellness_fields_migrate_to_general_reminders(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": 3,
+                "lunch_enabled": False,
+                "lunch_time": "14:15",
+                "water_interval_minutes": 35,
+            }
+        )
+        reminders = {item["id"]: item for item in config.reminders}
+        self.assertFalse(reminders["lunch"]["enabled"])
+        self.assertEqual(reminders["lunch"]["time"], "14:15")
+        self.assertEqual(reminders["water"]["interval_minutes"], 35)
+
+    def test_config_snapshots_deep_copy_reminders_and_actions(self) -> None:
+        config = Config()
+        config.actions = [{"id": "docs", "type": "url", "target": "https://x"}]
+        snapshot = config.to_dict()
+        config.reminders[0]["title"] = "Changed"
+        config.actions[0]["target"] = "https://changed"
+        self.assertNotEqual(snapshot["reminders"][0]["title"], "Changed")
+        self.assertEqual(snapshot["actions"][0]["target"], "https://x")
+
+    def test_invalid_and_duplicate_phase_four_definitions_are_removed(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": 4,
+                "reminders": [
+                    {"id": "bad"},
+                    {
+                        "id": "stand",
+                        "title": "Stand",
+                        "recurrence": "daily",
+                        "time": "09:00",
+                    },
+                    {
+                        "id": "stand",
+                        "title": "Duplicate",
+                        "recurrence": "daily",
+                        "time": "10:00",
+                    },
+                ],
+                "actions": [
+                    {"id": "bad"},
+                    {
+                        "id": "site",
+                        "name": "Site",
+                        "type": "url",
+                        "target": "https://example.com",
+                    },
+                    {
+                        "id": "site",
+                        "name": "Duplicate",
+                        "type": "url",
+                        "target": "https://example.org",
+                    },
+                ],
+            }
+        )
+        self.assertEqual([item["id"] for item in config.reminders], ["stand"])
+        self.assertEqual([item["id"] for item in config.actions], ["site"])
+
     def test_invalid_focus_values_are_normalized(self) -> None:
         config = Config.from_dict(
             {

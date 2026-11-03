@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -30,11 +32,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .actions import ActionDefinition, ActionType, validate_target
 from .behavior import Brain, State, World
 from .character import Palette, make_character
 from .config import SPECIES, THEMES, Config
 from .focus import FocusStatus, SessionKind, format_duration, kind_label
 from .platforms.base import Capability
+from .wellness import Reminder, parse_reminder_phrase
 
 
 class CharacterPreview(QWidget):
@@ -104,6 +108,221 @@ class CharacterPreview(QWidget):
         painter.translate((self.width() - width) / 2.0, self.height() - 8.0 - height)
         self._character.paint(painter, self._brain, width, height)
         painter.end()
+
+
+class ReminderEditDialog(QDialog):
+    """Editor for a general reminder and its locally parsed schedule."""
+
+    def __init__(
+        self, controller, raw: dict | None = None, parent: QWidget | None = None
+    ) -> None:  # noqa: ANN001
+        super().__init__(parent)
+        self.controller = controller
+        self.raw = dict(raw or {})
+        reminder = Reminder.from_dict(self.raw) if raw else None
+        self.setWindowTitle("Edit reminder" if raw else "Add reminder")
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.title_edit = QLineEdit(reminder.title if reminder else "")
+        self.message_edit = QLineEdit(reminder.message if reminder else "")
+        self.icon_edit = QLineEdit(reminder.icon if reminder else "⏰")
+        self.icon_edit.setMaxLength(8)
+        self.schedule_edit = QLineEdit(
+            reminder.schedule().describe() if reminder else "in 20 minutes"
+        )
+        self.schedule_edit.setPlaceholderText(
+            "in 20 minutes, daily at 9, weekdays at 09:00, every 2 hours"
+        )
+        self.snooze_spin = QSpinBox()
+        self.snooze_spin.setRange(1, 1440)
+        self.snooze_spin.setSuffix(" min")
+        self.snooze_spin.setValue(reminder.snooze_minutes if reminder else 10)
+        self.action_combo = QComboBox()
+        self.action_combo.addItem("No action", None)
+        for action_id, name in (
+            ("dance", "Dance"),
+            ("show-buddy", "Show buddy"),
+            ("open-settings", "Open settings"),
+            ("start-focus", "Start focus"),
+            ("stop-focus", "Stop focus"),
+        ):
+            self.action_combo.addItem(f"{name} (built-in)", action_id)
+        for item in controller.config.actions:
+            action = ActionDefinition.from_dict(item)
+            if action is not None:
+                self.action_combo.addItem(action.name, action.id)
+        if reminder and reminder.action_id:
+            index = self.action_combo.findData(reminder.action_id)
+            if index >= 0:
+                self.action_combo.setCurrentIndex(index)
+        form.addRow("Title", self.title_edit)
+        form.addRow("Message", self.message_edit)
+        form.addRow("Icon", self.icon_edit)
+        form.addRow("Schedule", self.schedule_edit)
+        form.addRow("Default snooze", self.snooze_spin)
+        form.addRow("Action after Done", self.action_combo)
+        layout.addLayout(form)
+        hint = QLabel(
+            "Schedules are interpreted locally. Supported examples: “in 20 minutes”, "
+            "“tomorrow at 8 pm”, “daily at 9”, “weekdays at 09:00”, and “every 2 hours”."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.enabled_check = QCheckBox("Enabled")
+        self.enabled_check.setChecked(reminder.enabled if reminder else True)
+        self.urgent_check = QCheckBox("Urgent (may interrupt outside active hours)")
+        self.urgent_check.setChecked(reminder.urgent if reminder else False)
+        layout.addWidget(self.enabled_check)
+        layout.addWidget(self.urgent_check)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def definition(self) -> dict[str, object]:
+        schedule = parse_reminder_phrase(self.schedule_edit.text())
+        title = self.title_edit.text().strip()
+        data: dict[str, object] = {
+            "id": self.raw.get("id", "temporary"),
+            "kind": self.raw.get("kind", "custom"),
+            "title": title,
+            "icon": self.icon_edit.text().strip() or "⏰",
+            "message": self.message_edit.text().strip() or f"{title}!",
+            "recurrence": schedule.recurrence.value,
+            "enabled": self.enabled_check.isChecked(),
+            "urgent": self.urgent_check.isChecked(),
+            "snooze_minutes": self.snooze_spin.value(),
+        }
+        if schedule.time_of_day is not None:
+            data["time"] = schedule.time_of_day.strftime("%H:%M")
+        if schedule.one_time_at is not None:
+            data["one_time_at"] = schedule.one_time_at.isoformat()
+        if schedule.interval_minutes is not None:
+            data["interval_minutes"] = schedule.interval_minutes
+        if schedule.weekdays:
+            data["weekdays"] = list(schedule.weekdays)
+        if self.action_combo.currentData():
+            data["action_id"] = str(self.action_combo.currentData())
+        return data
+
+    def _validate_and_accept(self) -> None:
+        if not self.title_edit.text().strip():
+            QMessageBox.warning(self, "Missing title", "Enter a reminder title.")
+            return
+        try:
+            self.definition()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid schedule", str(exc))
+            return
+        self.accept()
+
+
+class ActionEditDialog(QDialog):
+    """Editor that requires explicit confirmation before approving commands."""
+
+    def __init__(self, raw: dict | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.raw = dict(raw or {})
+        action = ActionDefinition.from_dict(self.raw) if raw else None
+        self.setWindowTitle("Edit quick action" if raw else "Add quick action")
+        self.setMinimumWidth(520)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.name_edit = QLineEdit(action.name if action else "")
+        self.type_combo = QComboBox()
+        for action_type, label in (
+            (ActionType.BUILTIN, "Built-in action"),
+            (ActionType.APPLICATION, "Launch application"),
+            (ActionType.URL, "Open URL"),
+            (ActionType.COMMAND, "Approved command"),
+        ):
+            self.type_combo.addItem(label, action_type)
+        if action:
+            self.type_combo.setCurrentIndex(self.type_combo.findData(action.type))
+        self.target_edit = QLineEdit(action.target if action else "")
+        self.target_edit.setPlaceholderText(
+            "dance / firefox --private-window / https://example.com"
+        )
+        self.enabled_check = QCheckBox("Enabled")
+        self.enabled_check.setChecked(action.enabled if action else True)
+        form.addRow("Name", self.name_edit)
+        form.addRow("Type", self.type_combo)
+        form.addRow("Target", self.target_edit)
+        layout.addLayout(form)
+        layout.addWidget(self.enabled_check)
+        warning = QLabel(
+            "Command actions run the exact argument list shown above, without a shell. "
+            "They can still modify files or launch programs. Approve only commands you "
+            "understand and trust."
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet(
+            "background:#fff4d6;color:#5f4b16;border:1px solid #e4cb7a;"
+            "border-radius:6px;padding:7px;"
+        )
+        layout.addWidget(warning)
+        self.approve_check = QCheckBox("I explicitly approve this command")
+        unchanged_approval = bool(action and action.approved)
+        self.approve_check.setChecked(unchanged_approval)
+        layout.addWidget(self.approve_check)
+        self.type_combo.currentIndexChanged.connect(self._sync_command_warning)
+        self.target_edit.textEdited.connect(self._target_changed)
+        self._initial_target = action.target if action else ""
+        self._sync_command_warning()
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _sync_command_warning(self) -> None:
+        command = self.type_combo.currentData() is ActionType.COMMAND
+        self.approve_check.setVisible(command)
+
+    def _target_changed(self, text: str) -> None:
+        if text != self._initial_target:
+            self.approve_check.setChecked(False)
+
+    def definition(self) -> dict[str, object]:
+        action_type = self.type_combo.currentData()
+        return {
+            "id": self.raw.get("id", "temporary"),
+            "name": self.name_edit.text().strip(),
+            "type": action_type.value,
+            "target": self.target_edit.text().strip(),
+            "enabled": self.enabled_check.isChecked(),
+            "approved": bool(
+                action_type is ActionType.COMMAND and self.approve_check.isChecked()
+            ),
+        }
+
+    def _validate_and_accept(self) -> None:
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "Missing name", "Enter an action name.")
+            return
+        action_type = self.type_combo.currentData()
+        error = validate_target(action_type, self.target_edit.text())
+        if error:
+            QMessageBox.warning(self, "Invalid target", error)
+            return
+        if action_type is ActionType.COMMAND and self.approve_check.isChecked():
+            answer = QMessageBox.warning(
+                self,
+                "Approve command action?",
+                "This command can affect your computer. Run it only if you understand "
+                "the exact target shown.\n\nApprove this command?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer is not QMessageBox.StandardButton.Yes:
+                return
+        self.accept()
 
 
 class PreferencesDialog(QDialog):
@@ -242,44 +461,44 @@ class PreferencesDialog(QDialog):
 
     def _build_reminders_tab(self) -> None:
         _, layout = self._page("Reminders")
-        self.check_reminders = QCheckBox("Enable wellness reminders")
+        self.check_reminders = QCheckBox("Enable reminders")
         self.check_chime = QCheckBox("Play a gentle chime")
         self.check_reminders.toggled.connect(self._on_reminders_enabled)
         self.check_chime.toggled.connect(self._on_reminder_sound)
         layout.addWidget(self.check_reminders)
         layout.addWidget(self.check_chime)
-        grid = QGridLayout()
-        self.meal_widgets: dict[str, tuple[QCheckBox, QTimeEdit]] = {}
-        meals = (
-            ("breakfast", "Breakfast"),
-            ("lunch", "Lunch"),
-            ("snack", "Snack"),
-            ("dinner", "Dinner"),
-            ("winddown", "Wind down"),
+        reminder_group = QGroupBox("Your reminders")
+        reminder_layout = QVBoxLayout(reminder_group)
+        self.reminder_list = QListWidget()
+        self.reminder_list.itemDoubleClicked.connect(
+            lambda _item: self._edit_reminder()
         )
-        for row, (key, label) in enumerate(meals):
-            check = QCheckBox(label)
-            edit = QTimeEdit()
-            edit.setDisplayFormat("HH:mm")
-            check.toggled.connect(lambda value, k=key: self._on_meal_enabled(k, value))
-            edit.timeChanged.connect(lambda value, k=key: self._on_meal_time(k, value))
-            grid.addWidget(check, row, 0)
-            grid.addWidget(edit, row, 1)
-            self.meal_widgets[key] = (check, edit)
-        self.water_slider, self.water_label, water_row = self._slider_row(
-            10, 180, " min"
-        )
-        self.water_slider.valueChanged.connect(self._on_water_interval)
-        self.break_slider, self.break_label, break_row = self._slider_row(
-            20, 240, " min"
-        )
-        self.break_slider.valueChanged.connect(self._on_break_interval)
-        grid.addWidget(QLabel("Water every"), 0, 2)
-        grid.addWidget(water_row, 0, 3)
-        grid.addWidget(QLabel("Stretch every"), 1, 2)
-        grid.addWidget(break_row, 1, 3)
-        layout.addLayout(grid)
-        layout.addStretch()
+        reminder_layout.addWidget(self.reminder_list)
+        buttons = QHBoxLayout()
+        self.reminder_add_button = QPushButton("Add…")
+        self.reminder_edit_button = QPushButton("Edit…")
+        self.reminder_remove_button = QPushButton("Remove")
+        self.reminder_fire_button = QPushButton("Show now")
+        self.reminder_add_button.clicked.connect(self._add_reminder)
+        self.reminder_edit_button.clicked.connect(self._edit_reminder)
+        self.reminder_remove_button.clicked.connect(self._remove_reminder)
+        self.reminder_fire_button.clicked.connect(self._fire_selected_reminder)
+        for button in (
+            self.reminder_add_button,
+            self.reminder_edit_button,
+            self.reminder_remove_button,
+            self.reminder_fire_button,
+        ):
+            buttons.addWidget(button)
+        buttons.addStretch()
+        reminder_layout.addLayout(buttons)
+        layout.addWidget(reminder_group, 1)
+        history_group = QGroupBox("Recent history")
+        history_layout = QVBoxLayout(history_group)
+        self.reminder_history_list = QListWidget()
+        self.reminder_history_list.setMaximumHeight(130)
+        history_layout.addWidget(self.reminder_history_list)
+        layout.addWidget(history_group)
 
     def _build_focus_tab(self) -> None:
         _, layout = self._page("Focus")
@@ -402,7 +621,36 @@ class PreferencesDialog(QDialog):
         )
         layout.addWidget(self.check_perch)
         layout.addWidget(self.check_autostart)
-        layout.addStretch()
+        actions_group = QGroupBox("Quick actions")
+        actions_layout = QVBoxLayout(actions_group)
+        actions_help = QLabel(
+            "Create shortcuts for built-ins, applications, URLs, or explicitly "
+            "approved commands. Reminder actions run only after you press Done."
+        )
+        actions_help.setWordWrap(True)
+        actions_layout.addWidget(actions_help)
+        self.action_list = QListWidget()
+        self.action_list.itemDoubleClicked.connect(lambda _item: self._edit_action())
+        actions_layout.addWidget(self.action_list)
+        action_buttons = QHBoxLayout()
+        self.action_add_button = QPushButton("Add…")
+        self.action_edit_button = QPushButton("Edit…")
+        self.action_remove_button = QPushButton("Remove")
+        self.action_run_button = QPushButton("Run")
+        self.action_add_button.clicked.connect(self._add_action)
+        self.action_edit_button.clicked.connect(self._edit_action)
+        self.action_remove_button.clicked.connect(self._remove_action)
+        self.action_run_button.clicked.connect(self._run_action)
+        for button in (
+            self.action_add_button,
+            self.action_edit_button,
+            self.action_remove_button,
+            self.action_run_button,
+        ):
+            action_buttons.addWidget(button)
+        action_buttons.addStretch()
+        actions_layout.addLayout(action_buttons)
+        layout.addWidget(actions_group, 1)
 
     def _build_system_tab(self) -> None:
         _, layout = self._page("System")
@@ -513,11 +761,8 @@ class PreferencesDialog(QDialog):
         self.check_autostart.setChecked(self.controller.autostart_active())
         self.check_reminders.setChecked(config.reminders_enabled)
         self.check_chime.setChecked(config.reminder_sound)
-        for key, (check, edit) in self.meal_widgets.items():
-            check.setChecked(bool(getattr(config, f"{key}_enabled")))
-            edit.setTime(QTime.fromString(getattr(config, f"{key}_time"), "HH:mm"))
-        self.water_slider.setValue(config.water_interval_minutes)
-        self.break_slider.setValue(config.break_interval_minutes)
+        self.refresh_reminders()
+        self.refresh_actions()
         self.preview.refresh()
 
     def _apply_capabilities(self) -> None:
@@ -597,23 +842,147 @@ class PreferencesDialog(QDialog):
         if not self._loading:
             self.controller.set_reminder_sound(value)
 
-    def _on_meal_enabled(self, key: str, value: bool) -> None:
-        if not self._loading:
-            self.controller.set_meal_enabled(key, value)
+    def refresh_reminders(self) -> None:
+        selected = self._selected_id(self.reminder_list)
+        self.reminder_list.clear()
+        for raw in self.controller.config.reminders:
+            reminder = Reminder.from_dict(raw)
+            if reminder is None:
+                continue
+            state = "on" if reminder.enabled else "off"
+            urgency = " · urgent" if reminder.urgent else ""
+            item = QListWidgetItem(
+                f"{reminder.icon} {reminder.title} — {reminder.schedule().describe()} "
+                f"· {state}{urgency}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, reminder.id)
+            self.reminder_list.addItem(item)
+            if reminder.id == selected:
+                self.reminder_list.setCurrentItem(item)
+        self.reminder_history_list.clear()
+        wellness = getattr(self.controller, "_wellness", None)
+        if wellness is not None and callable(getattr(wellness, "recent_history", None)):
+            for entry in wellness.recent_history(12):
+                self.reminder_history_list.addItem(
+                    f"{entry.handled_at.strftime('%b %d %H:%M')} · "
+                    f"{entry.status.value} · {entry.title}"
+                )
 
-    def _on_meal_time(self, key: str, value: QTime) -> None:
-        if not self._loading:
-            self.controller.set_meal_time(key, value.toString("HH:mm"))
+    def refresh_actions(self) -> None:
+        selected = self._selected_id(self.action_list)
+        self.action_list.clear()
+        for raw in self.controller.config.actions:
+            action = ActionDefinition.from_dict(raw)
+            if action is None:
+                continue
+            flags = []
+            if not action.enabled:
+                flags.append("off")
+            if action.type is ActionType.COMMAND and not action.approved:
+                flags.append("not approved")
+            suffix = f" · {', '.join(flags)}" if flags else ""
+            item = QListWidgetItem(
+                f"{action.name} — {action.type.value}: {action.target}{suffix}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, action.id)
+            self.action_list.addItem(item)
+            if action.id == selected:
+                self.action_list.setCurrentItem(item)
 
-    def _on_water_interval(self, value: int) -> None:
-        self.water_label.setText(f"{value} min")
-        if not self._loading:
-            self.controller.set_water_interval(value)
+    @staticmethod
+    def _selected_id(widget: QListWidget) -> str | None:
+        item = widget.currentItem()
+        return str(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
 
-    def _on_break_interval(self, value: int) -> None:
-        self.break_label.setText(f"{value} min")
-        if not self._loading:
-            self.controller.set_break_interval(value)
+    def _reminder_raw(self, reminder_id: str | None) -> dict | None:
+        return next(
+            (
+                item
+                for item in self.controller.config.reminders
+                if isinstance(item, dict) and item.get("id") == reminder_id
+            ),
+            None,
+        )
+
+    def _action_raw(self, action_id: str | None) -> dict | None:
+        return next(
+            (
+                item
+                for item in self.controller.config.actions
+                if isinstance(item, dict) and item.get("id") == action_id
+            ),
+            None,
+        )
+
+    def _add_reminder(self) -> None:
+        dialog = ReminderEditDialog(self.controller, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.controller.save_reminder_definition(dialog.definition())
+            except ValueError as exc:
+                QMessageBox.warning(self, "Could not save reminder", str(exc))
+            self.refresh_reminders()
+
+    def _edit_reminder(self) -> None:
+        reminder_id = self._selected_id(self.reminder_list)
+        raw = self._reminder_raw(reminder_id)
+        if raw is None:
+            return
+        dialog = ReminderEditDialog(self.controller, raw, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.controller.save_reminder_definition(
+                    dialog.definition(), reminder_id
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Could not save reminder", str(exc))
+            self.refresh_reminders()
+
+    def _remove_reminder(self) -> None:
+        reminder_id = self._selected_id(self.reminder_list)
+        if reminder_id and self.controller.remove_reminder(reminder_id):
+            self.refresh_reminders()
+
+    def _fire_selected_reminder(self) -> None:
+        reminder_id = self._selected_id(self.reminder_list)
+        if reminder_id:
+            self.controller.remind_now(reminder_id)
+
+    def _add_action(self) -> None:
+        dialog = ActionEditDialog(parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.controller.save_action_definition(dialog.definition())
+            except ValueError as exc:
+                QMessageBox.warning(self, "Could not save action", str(exc))
+            self.refresh_actions()
+
+    def _edit_action(self) -> None:
+        action_id = self._selected_id(self.action_list)
+        raw = self._action_raw(action_id)
+        if raw is None:
+            return
+        dialog = ActionEditDialog(raw, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.controller.save_action_definition(dialog.definition(), action_id)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Could not save action", str(exc))
+            self.refresh_actions()
+
+    def _remove_action(self) -> None:
+        action_id = self._selected_id(self.action_list)
+        if action_id and self.controller.remove_action(action_id):
+            self.refresh_actions()
+            self.refresh_reminders()
+
+    def _run_action(self) -> None:
+        action_id = self._selected_id(self.action_list)
+        if not action_id:
+            return
+        result = self.controller.run_action(action_id, announce=False)
+        if not result.ok:
+            QMessageBox.warning(self, "Action not run", result.message)
 
     def _on_focus_setting(self, key: str, value: int | bool) -> None:
         if not self._loading:

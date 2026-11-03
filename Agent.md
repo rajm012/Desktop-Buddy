@@ -4,9 +4,9 @@ This file is the operational handbook for coding agents working in this reposito
 
 ## 1. Project at a glance
 
-Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local wellness reminders, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
+Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local custom reminders, safe quick actions, a focus timer, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
 
-Current package version: `1.4.0`.
+Current package version: `1.5.0`.
 
 Primary supported environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows and macOS currently use the generic backend and are roadmap work, not supported native implementations.
 
@@ -31,7 +31,8 @@ Repository state at handoff:
 - Phase 1 is complete: platform backend abstraction and Linux/X11 isolation.
 - Phase 2 is complete: tabbed preferences, onboarding, capability status, attention controls, config import/export/reset, and animation previews.
 - Phase 3 is complete: pure focus state machine, configurable focus/break durations, tray/CLI/IPC actions, restoration, daily history, character feedback, and attention suppression.
-- Phases 4 through 11 have not started.
+- Phase 4 is complete: general reminders, local schedule parsing, outcome history, safe quick actions, explicit command approval, Preferences/tray integration, and CLI/IPC controls.
+- Phases 5 through 11 have not started.
 
 Important history note: commit `6f057a3` is titled `phase-3`, but its actual changes completed Phase 2. The focus timer was implemented in the working tree after that commit; use current code and tests rather than the old commit name.
 
@@ -39,10 +40,10 @@ Verification at handoff:
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
-- Unit/smoke tests: 95 passing.
+- Unit/smoke tests: 121 passing.
 - Source distribution and wheel build: passing.
 
-The next roadmap task is Phase 4, Step 1: replace fixed wellness fields with a general reminder model while preserving existing reminder data.
+The next roadmap task is Phase 5, Step 1: define plugin metadata, lifecycle, and compatibility version fields. Read the Phase 4 reference below before extracting reminder/action extension points.
 
 ## 3. Repository map
 
@@ -73,7 +74,8 @@ The next roadmap task is Phase 4, Step 1: replace fixed wellness fields with a g
 | `desktop_buddy/window.py` | Transparent buddy window, painting loop, input, dragging, positioning, perching. |
 | `desktop_buddy/effects.py` | Particle effects such as dust, hearts, notes, drops, and sleep bubbles. |
 | `desktop_buddy/config.py` | Config dataclass, validation, migration, atomic JSON persistence, themes/species. |
-| `desktop_buddy/wellness.py` | Pure reminder definitions, scheduling, snooze state, and history timestamps. |
+| `desktop_buddy/wellness.py` | Pure general reminder model, recurrence, local phrase parsing, scheduling, snooze, and outcome history. |
+| `desktop_buddy/actions.py` | Pure validation and permission-aware registry for built-in, application, URL, and command actions. |
 | `desktop_buddy/focus.py` | Pure focus/break state machine, versioned state, restoration, and daily history. |
 | `desktop_buddy/toast.py` | Reminder card with Done and Snooze actions. |
 | `desktop_buddy/sound.py` | Generated WAV reminder chimes. |
@@ -91,9 +93,10 @@ The next roadmap task is Phase 4, Step 1: replace fixed wellness fields with a g
 | `tests/test_behavior.py` | Physics, autonomous behavior, perching, reduced motion. |
 | `tests/test_window_math.py` | Window and buddy coordinate calculations. |
 | `tests/test_config.py` | Defaults, validation, migrations, serialization, autostart config. |
-| `tests/test_wellness.py` | Meal/interval scheduling, active hours, snooze, persisted state. |
+| `tests/test_wellness.py` | General recurrence, phrase parsing, quiet hours, outcomes, and persisted state. |
 | `tests/test_focus.py` | Focus transitions, deadline accuracy, restoration, cadence, history, corrupt state. |
-| `tests/test_app_cli_ipc.py` | CLI parsing, local socket IPC, config transactions. |
+| `tests/test_actions.py` | Action target validation, exact argv execution, built-ins, and command approval enforcement. |
+| `tests/test_app_cli_ipc.py` | CLI parsing, local socket IPC, config transactions, reminder outcomes, and action safety. |
 | `tests/test_platform_backend.py` | Paths, capabilities, Linux services, architecture isolation. |
 | `tests/test_prefs_smoke.py` | Preferences/onboarding construction, cancellation, capability messaging. |
 | `tests/test_renderer_smoke.py` | Every character/theme combination renders visible pixels. |
@@ -111,14 +114,14 @@ The normal application path is:
 1. `desktop_buddy.app.main()` parses CLI arguments and selects a platform backend with `get_backend()`.
 2. Control commands attempt to contact the running process through a `QLocalSocket`.
 3. If no control command is being sent and no instance is active, `main()` creates `QApplication`, loads `Config`, and constructs `Controller`.
-4. `Controller` owns the buddy window, tray, preferences, reminder and focus
-   engines, toast queue, save timers, and local IPC server.
+4. `Controller` owns the buddy window, tray, preferences, reminder/focus
+   engines, action registry, toast queue, save timers, and local IPC server.
 5. `BuddyWindow` owns the `Brain` behavior state and renders the selected character and particle effects.
 6. Pure domain modules calculate state; Qt/UI modules schedule work and display the results; the backend performs supported OS operations.
 
 Maintain these boundaries:
 
-- `behavior.py`, `wellness.py`, and `focus.py` should remain deterministic, headless, and unit-testable.
+- `behavior.py`, `wellness.py`, `focus.py`, and `actions.py` should remain deterministic, headless, and unit-testable.
 - `app.py` coordinates services but should not become the home for domain rules.
 - `window.py`, `prefs.py`, `tray.py`, and `toast.py` are Qt presentation layers.
 - Native calls, platform paths, autostart details, active-window inspection, and platform capability decisions belong under `desktop_buddy/platforms/`.
@@ -140,7 +143,7 @@ Do not hard-code these paths in application logic. Always use backend paths.
 Config rules:
 
 - `Config` is a dataclass in `config.py`.
-- Current config schema version is `3`.
+- Current config schema version is `4`.
 - `Config.save()` writes a temporary file and atomically replaces the target.
 - Unknown JSON keys are ignored when loading.
 - Values are normalized and clamped after migration.
@@ -149,8 +152,9 @@ Config rules:
 
 Wellness state rules:
 
-- Current wellness schema version is `1`.
+- Current wellness schema version is `2`.
 - Datetimes are local, timezone-naive ISO strings in the current implementation.
+- Config holds reminder/action definitions; `reminders.json` holds runtime timestamps and the capped outcome history.
 - Invalid or non-mapping persisted data falls back safely.
 - State changes must remain backward compatible unless a tested migration is added.
 
@@ -184,7 +188,7 @@ Do not assume X11 merely because the OS is Linux. Wayland limitations are an exp
 - Keep dialogs usable on common laptop screens.
 - Preserve high-DPI behavior; the renderer and geometry operate in logical pixels and Qt handles device scaling.
 
-The Focus tab in `prefs.py` provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep its controls synchronized with tray and CLI behavior.
+The Reminders tab edits general schedules and displays outcome history. The Integrations tab edits quick actions and owns the explicit command warning/approval flow. The Focus tab provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep these controls synchronized with tray and CLI behavior.
 
 ## 8. Development commands
 
@@ -272,7 +276,7 @@ Implemented structure:
 
 ### Settings and versioned state
 
-- Validated duration/cadence preferences live in config schema version 3.
+- Focus duration/cadence preferences were introduced in config schema 3 and remain present in current schema 4.
 - `focus.json` stores versioned runtime state/history under the backend state directory.
 - Active and paused sessions restore safely after restart.
 - Atomic writes tolerate missing, corrupt, and older files.
@@ -307,9 +311,55 @@ Phase 3 acceptance criteria:
 - An active session restores correctly after restart.
 - The feature requires no account or network connection.
 
-All eight Phase 3 steps and all acceptance criteria are checked in `ROADMAP.md`. The next implementation handoff is Phase 4: custom reminders and quick actions.
+All eight Phase 3 steps and all acceptance criteria are checked in `ROADMAP.md`.
 
-## 11. Known constraints and common pitfalls
+## 11. Phase 4 implementation reference
+
+Phase 4 is complete. Preserve these security and scheduling guarantees when adding plugins or integrations.
+
+### General reminder model
+
+- `desktop_buddy/wellness.py` defines `Reminder`, `ScheduleSpec`, `ReminderOccurrence`, `HistoryEntry`, and the `WellnessEngine` without Qt dependencies.
+- Recurrence values are `one_time`, `daily`, `weekdays`, and `interval`.
+- `parse_reminder_phrase()` intentionally implements a small deterministic grammar: relative minutes/hours/days, daily/weekday clock times, intervals, tomorrow, and ISO dates.
+- Times are local and timezone-naive. Tests pin the local wall clock; do not silently introduce network or geolocation behavior.
+- Non-urgent reminders are suppressed outside `active_start` / `active_end`. Urgent reminders can interrupt outside that window. Do-not-disturb suppresses all automatic reminder display at the controller boundary.
+- Due occurrences are marked triggered before display, not done. The toast callbacks record terminal `done`, `missed`, or `snoozed` outcomes.
+- Runtime state schema 2 stores `last_done`, `last_triggered`, `snooze_until`, and a maximum of 500 history entries in `reminders.json`.
+
+### Config migration and ownership
+
+- Config schema 4 owns `reminders` and `actions` definition lists.
+- Migration converts the old breakfast/lunch/snack/dinner/wind-down/water/stretch fields to general definitions while retaining IDs such as `breakfast`, `water`, and `break`; this preserves existing runtime state associations.
+- Legacy scalar wellness fields remain for backward compatibility, but `config.reminders` is the scheduling source of truth.
+- `Config.to_dict()` deep-copies mutable definition lists so Preferences cancellation is transactional.
+
+### Action security model
+
+- `desktop_buddy/actions.py` validates definitions and dispatches through injected executors.
+- Built-ins are controller callbacks: dance, show buddy, open settings, start focus, and stop focus.
+- URL actions permit only `http`, `https`, and `mailto` schemes.
+- Application and command targets use `shlex.split()` and `subprocess.Popen(argv, start_new_session=True)`; never add `shell=True`.
+- A command definition is inert unless `approved` is true. Preferences displays a strong warning, requires an explicit checkbox plus confirmation, and clears approval when the target changes.
+- Attached reminder actions run only after the user presses Done. Dismiss and Snooze never run the action.
+
+### UI, tray, CLI, and IPC
+
+- The Reminders Preferences tab lists definitions, supports add/edit/remove/manual display, parses schedules locally, and shows recent outcome history.
+- The Integrations tab manages configured quick actions. The tray exposes safe built-ins and enabled configured actions; unapproved commands are disabled.
+- CLI/IPC supports `remind ID`, `reminders on|off|status|list|history`, `reminders add|remove|done|snooze`, and `actions list|run`.
+- IPC tokenization uses `shlex.split()` so quoted titles and schedule phrases remain intact.
+
+### Phase 4 test coverage
+
+- `tests/test_wellness.py` covers parsing, recurrence, weekdays, one-time firing, quiet hours, urgency, snooze/missed history, persistence, and deterministic local time.
+- `tests/test_actions.py` proves URL restrictions, exact argv dispatch, disabled definitions, built-ins, and the rule that unapproved commands never reach an executor.
+- `tests/test_app_cli_ipc.py` covers parser/IPC management, pre-display trigger state, done/missed controller outcomes, and command denial through IPC.
+- `tests/test_prefs_smoke.py` covers the new list controls, schedule editor, command-approval reset, transactions, and capability messaging.
+
+All eight Phase 4 steps and acceptance criteria are checked in `ROADMAP.md`. The next handoff is Phase 5: plugin metadata and lifecycle. Plugins must not weaken the action approval boundary or move reminder scheduling into Qt/plugin UI code.
+
+## 12. Known constraints and common pitfalls
 
 - Linux/X11 is the only full desktop backend today.
 - Wayland cannot reliably support arbitrary positioning, click-through, global window inspection, or forced always-on-top using standard Qt alone.
@@ -320,9 +370,11 @@ All eight Phase 3 steps and all acceptance criteria are checked in `ROADMAP.md`.
 - `Controller._status_text()` reads selected private window fields for diagnostics. Do not copy this pattern into feature logic.
 - Build output directories (`build/`, `dist/`, `*.egg-info`) are generated artifacts, not feature source.
 - Do not use character names as stable IDs. Use species keys such as `robot`, `ghost`, and `mochi`.
-- Do not put native platform code into `behavior.py`, `wellness.py`, or `focus.py`.
+- Do not put native platform code into `behavior.py`, `wellness.py`, `focus.py`, or `actions.py`.
+- Never execute a configured command through a shell, infer command approval, or retain approval after its target changes.
+- Do not mark a reminder done when it is merely displayed; user outcome callbacks own terminal history.
 
-## 12. Agent workflow
+## 13. Agent workflow
 
 For every task:
 
@@ -344,7 +396,7 @@ Avoid:
 - Destructive Git operations or overwriting unrelated work.
 - Checking a roadmap box merely because scaffolding or placeholder UI exists.
 
-## 13. Sources of truth
+## 14. Sources of truth
 
 When documents disagree, use this order:
 

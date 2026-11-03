@@ -7,7 +7,9 @@ import json
 import logging
 import os
 import random
+import shlex
 import signal
+import subprocess
 import sys
 import time
 from contextlib import suppress
@@ -15,12 +17,13 @@ from dataclasses import fields
 from datetime import date, datetime
 from typing import Callable
 
-from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
-from PyQt6.QtGui import QGuiApplication, QIcon
+from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices, QGuiApplication, QIcon
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_SLUG, __version__
+from .actions import ActionDefinition, ActionRegistry
 from .character import Palette
 from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
 from .focus import (
@@ -39,7 +42,12 @@ from .prefs import OnboardingDialog, PreferencesDialog
 from .sound import chime_path
 from .toast import ReminderToast
 from .tray import BuddyTray
-from .wellness import Reminder, ReminderState, WellnessEngine
+from .wellness import (
+    Reminder,
+    ReminderState,
+    WellnessEngine,
+    parse_reminder_phrase,
+)
 from .window import BuddyWindow
 
 log = logging.getLogger(__name__)
@@ -194,6 +202,7 @@ class Controller(QObject):
             FocusSettings.from_config(self.config),
             FocusState.load(self._focus_path),
         )
+        self._actions = self._build_actions()
         self.window.set_focus_state(
             self._focus.state.kind,
             self._focus.state.status,
@@ -256,6 +265,7 @@ class Controller(QObject):
         self.window.apply_config()
         self._rebuild_wellness()
         self._rebuild_focus()
+        getattr(self, "_rebuild_actions", lambda: None)()
         self.tray.refresh()
         self._schedule_save()
 
@@ -270,6 +280,7 @@ class Controller(QObject):
         self.window.apply_config()
         self._rebuild_wellness()
         self._rebuild_focus()
+        getattr(self, "_rebuild_actions", lambda: None)()
         self.tray.refresh()
         self._schedule_save()
 
@@ -427,17 +438,22 @@ class Controller(QObject):
                 encoding="utf-8",
             )
             os.replace(tmp, self._wellness_path)
+            self._wellness.dirty = False
         except OSError as exc:
             log.warning("Could not save reminder state: %s", exc)
 
     def _check_reminders(self) -> None:
         if not self.config.reminders_enabled or self.config.do_not_disturb:
+            if self._wellness.dirty:
+                self._save_wellness()
             return
         now = datetime.now()
-        for reminder in self._wellness.due(now):
-            self._wellness.mark_done(reminder, now)
+        occurrences = self._wellness.due(now)
+        for occurrence in occurrences:
+            self._wellness.mark_triggered(occurrence)
+            self._fire_reminder(occurrence.reminder)
+        if self._wellness.dirty:
             self._save_wellness()
-            self._fire_reminder(reminder)
 
     def _fire_reminder(self, reminder: Reminder, manual: bool = False) -> None:
         message = reminder.pick_message(self._rng)
@@ -502,7 +518,13 @@ class Controller(QObject):
     def _toast_done(self, reminder: Reminder) -> None:
         self._wellness.mark_done(reminder)
         self._save_wellness()
-        self.window.say("Noted! ✅", 3.0)
+        if reminder.action_id:
+            result = self.run_action(reminder.action_id, announce=False)
+            self.window.say(
+                result.message if not result.ok else "Done — action run! ✅", 4.0
+            )
+        else:
+            self.window.say("Noted! ✅", 3.0)
 
     def _toast_snooze(self, reminder: Reminder) -> None:
         minutes = self.config.snooze_minutes or reminder.snooze_minutes
@@ -511,7 +533,7 @@ class Controller(QObject):
         self.window.say(f"Snoozed {minutes} min 😴", 3.0)
 
     def _toast_dismiss(self, reminder: Reminder) -> None:
-        self._wellness.mark_done(reminder)
+        self._wellness.mark_missed(reminder)
         self._save_wellness()
 
     def reminders_summary(self, count: int = 6) -> str:
@@ -530,6 +552,116 @@ class Controller(QObject):
         QMessageBox.information(
             None, "Desktop Buddy — Reminders", self.reminders_summary(7)
         )
+
+    def reminder_history_summary(self, count: int = 20) -> str:
+        entries = self._wellness.recent_history(count)
+        if not entries:
+            return "No reminder history yet."
+        return "Reminder history:\n\n" + "\n".join(
+            f"{entry.handled_at.strftime('%Y-%m-%d %H:%M')}  "
+            f"{entry.status.value:<7}  {entry.title}"
+            for entry in entries
+        )
+
+    @staticmethod
+    def _unique_config_id(title: str, existing: set[str]) -> str:
+        base = (
+            "".join(
+                char if char.isalnum() or char in "_-" else "-"
+                for char in title.strip().lower()
+            ).strip("-")[:48]
+            or "item"
+        )
+        candidate = base
+        suffix = 2
+        while candidate in existing:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        return candidate
+
+    def save_reminder_definition(
+        self, data: dict[str, object], existing_id: str | None = None
+    ) -> str:
+        candidate = dict(data)
+        existing_ids = {
+            str(item.get("id", ""))
+            for item in self.config.reminders
+            if isinstance(item, dict) and str(item.get("id", "")) != existing_id
+        }
+        candidate["id"] = existing_id or self._unique_config_id(
+            str(candidate.get("title", "Reminder")), existing_ids
+        )
+        reminder = Reminder.from_dict(candidate)
+        if reminder is None:
+            raise ValueError("The reminder definition is incomplete or invalid.")
+        serialized = reminder.to_dict()
+        replaced = False
+        updated: list[dict[str, object]] = []
+        for item in self.config.reminders:
+            if isinstance(item, dict) and item.get("id") == existing_id:
+                updated.append(serialized)
+                replaced = True
+            elif isinstance(item, dict):
+                updated.append(item)
+        if not replaced:
+            updated.append(serialized)
+        self.config.reminders = updated
+        self._rebuild_wellness()
+        self.tray.refresh()
+        self._schedule_save()
+        return reminder.id
+
+    def add_reminder(self, title: str, schedule_text: str) -> str:
+        schedule = parse_reminder_phrase(schedule_text)
+        data: dict[str, object] = {
+            "title": title.strip()[:80] or "Reminder",
+            "kind": "custom",
+            "icon": "⏰",
+            "message": title.strip()[:500] or "Reminder!",
+            "enabled": True,
+            "urgent": False,
+            "snooze_minutes": self.config.snooze_minutes,
+            "recurrence": schedule.recurrence.value,
+        }
+        if schedule.time_of_day is not None:
+            data["time"] = schedule.time_of_day.strftime("%H:%M")
+        if schedule.one_time_at is not None:
+            data["one_time_at"] = schedule.one_time_at.isoformat()
+        if schedule.interval_minutes is not None:
+            data["interval_minutes"] = schedule.interval_minutes
+        if schedule.weekdays:
+            data["weekdays"] = list(schedule.weekdays)
+        return self.save_reminder_definition(data)
+
+    def remove_reminder(self, reminder_id: str) -> bool:
+        before = len(self.config.reminders)
+        self.config.reminders = [
+            item
+            for item in self.config.reminders
+            if not isinstance(item, dict) or item.get("id") != reminder_id
+        ]
+        if len(self.config.reminders) == before:
+            return False
+        self._rebuild_wellness()
+        self.tray.refresh()
+        self._schedule_save()
+        return True
+
+    def mark_reminder_done(self, reminder_id: str) -> bool:
+        reminder = self._wellness.find(reminder_id)
+        if reminder is None:
+            return False
+        self._wellness.mark_done(reminder)
+        self._save_wellness()
+        return True
+
+    def snooze_reminder(self, reminder_id: str, minutes: int | None = None) -> bool:
+        reminder = self._wellness.find(reminder_id)
+        if reminder is None:
+            return False
+        self._wellness.snooze(reminder, minutes)
+        self._save_wellness()
+        return True
 
     def set_reminders_enabled(self, enabled: bool) -> None:
         self.config.reminders_enabled = bool(enabled)
@@ -553,6 +685,9 @@ class Controller(QObject):
             return
         setattr(self.config, field, value)
         self.config.normalize()
+        for reminder in self.config.reminders:
+            if isinstance(reminder, dict) and reminder.get("id") == key:
+                reminder["time"] = getattr(self.config, field)
         self._rebuild_wellness()
         self._schedule_save()
 
@@ -561,20 +696,119 @@ class Controller(QObject):
         if not hasattr(self.config, field):
             return
         setattr(self.config, field, bool(enabled))
+        for reminder in self.config.reminders:
+            if isinstance(reminder, dict) and reminder.get("id") == key:
+                reminder["enabled"] = bool(enabled)
         self._rebuild_wellness()
         self._schedule_save()
 
     def set_water_interval(self, minutes: int) -> None:
         self.config.water_interval_minutes = int(minutes)
         self.config.normalize()
+        for reminder in self.config.reminders:
+            if isinstance(reminder, dict) and reminder.get("id") == "water":
+                reminder["interval_minutes"] = self.config.water_interval_minutes
         self._rebuild_wellness()
         self._schedule_save()
 
     def set_break_interval(self, minutes: int) -> None:
         self.config.break_interval_minutes = int(minutes)
         self.config.normalize()
+        for reminder in self.config.reminders:
+            if isinstance(reminder, dict) and reminder.get("id") == "break":
+                reminder["interval_minutes"] = self.config.break_interval_minutes
         self._rebuild_wellness()
         self._schedule_save()
+
+    # ---------------------------------------------------------------- actions
+    @staticmethod
+    def _spawn_process(parts: list[str]) -> bool:
+        if not parts:
+            return False
+        subprocess.Popen(parts, start_new_session=True)  # noqa: S603
+        return True
+
+    def _build_actions(self) -> ActionRegistry:
+        return ActionRegistry.from_config(
+            self.config.actions,
+            builtins={
+                "dance": self.dance,
+                "show-buddy": self.show_buddy,
+                "open-settings": self.open_settings,
+                "start-focus": self.focus_start,
+                "stop-focus": self.focus_stop,
+            },
+            open_url=lambda target: QDesktopServices.openUrl(QUrl(target)),
+            launch_application=self._spawn_process,
+            run_command=self._spawn_process,
+        )
+
+    def _rebuild_actions(self) -> None:
+        self._actions = self._build_actions()
+
+    def save_action_definition(
+        self, data: dict[str, object], existing_id: str | None = None
+    ) -> str:
+        candidate = dict(data)
+        existing_ids = {
+            str(item.get("id", ""))
+            for item in self.config.actions
+            if isinstance(item, dict) and str(item.get("id", "")) != existing_id
+        }
+        candidate["id"] = existing_id or self._unique_config_id(
+            str(candidate.get("name", "Action")), existing_ids
+        )
+        action = ActionDefinition.from_dict(candidate)
+        if action is None:
+            raise ValueError("The action definition is incomplete or invalid.")
+        updated: list[dict[str, object]] = []
+        replaced = False
+        for item in self.config.actions:
+            if isinstance(item, dict) and item.get("id") == existing_id:
+                updated.append(action.to_dict())
+                replaced = True
+            elif isinstance(item, dict):
+                updated.append(item)
+        if not replaced:
+            updated.append(action.to_dict())
+        self.config.actions = updated
+        self._rebuild_actions()
+        self.tray.refresh()
+        self._schedule_save()
+        return action.id
+
+    def remove_action(self, action_id: str) -> bool:
+        before = len(self.config.actions)
+        self.config.actions = [
+            item
+            for item in self.config.actions
+            if not isinstance(item, dict) or item.get("id") != action_id
+        ]
+        if len(self.config.actions) == before:
+            return False
+        for reminder in self.config.reminders:
+            if isinstance(reminder, dict) and reminder.get("action_id") == action_id:
+                reminder.pop("action_id", None)
+        self._rebuild_actions()
+        self._rebuild_wellness()
+        self.tray.refresh()
+        self._schedule_save()
+        return True
+
+    def run_action(self, action_id: str, announce: bool = True):  # noqa: ANN201
+        result = self._actions.execute(action_id)
+        if announce:
+            self.window.say(result.message, 4.0)
+        return result
+
+    def actions_summary(self) -> str:
+        builtins = ("dance", "show-buddy", "open-settings", "start-focus", "stop-focus")
+        lines = [f"{action_id}  builtin" for action_id in builtins]
+        lines.extend(
+            f"{action.id}  {action.type.value}  {action.name}"
+            for action in self._actions.list_actions()
+        )
+        return "Available actions:\n" + "\n".join(lines)
 
     # ------------------------------------------------------------------- focus
     def _rebuild_focus(self) -> None:
@@ -830,7 +1064,12 @@ class Controller(QObject):
     def handle_command(self, command: str) -> str | None:
         if not command:
             return None
-        parts = command.split()
+        try:
+            parts = shlex.split(command)
+        except ValueError as exc:
+            return f"invalid command: {exc}"
+        if not parts:
+            return None
         verb = parts[0]
         log.info("IPC command: %s", command)
         if verb == "status":
@@ -858,12 +1097,52 @@ class Controller(QObject):
                 return f"reminder fired: {parts[1]}"
             return f"unknown reminder: {parts[1]}"
         elif verb == "reminders" and len(parts) > 1:
-            if parts[1] == "status":
+            action = parts[1]
+            if action in {"status", "list"}:
                 return self.reminders_summary(6)
-            if parts[1] in ("on", "off"):
-                self.set_reminders_enabled(parts[1] == "on")
-                return f"reminders {parts[1]}"
-            return "usage: reminders on|off|status"
+            if action == "history":
+                return self.reminder_history_summary()
+            if action in ("on", "off"):
+                self.set_reminders_enabled(action == "on")
+                return f"reminders {action}"
+            if action == "add" and len(parts) >= 4:
+                try:
+                    reminder_id = self.add_reminder(parts[2], parts[3])
+                except ValueError as exc:
+                    return f"could not add reminder: {exc}"
+                return f"reminder added: {reminder_id}"
+            if action == "remove" and len(parts) >= 3:
+                return (
+                    f"reminder removed: {parts[2]}"
+                    if self.remove_reminder(parts[2])
+                    else f"unknown reminder: {parts[2]}"
+                )
+            if action == "done" and len(parts) >= 3:
+                return (
+                    f"reminder done: {parts[2]}"
+                    if self.mark_reminder_done(parts[2])
+                    else f"unknown reminder: {parts[2]}"
+                )
+            if action == "snooze" and len(parts) >= 3:
+                try:
+                    minutes = int(parts[3]) if len(parts) >= 4 else None
+                except ValueError:
+                    return "snooze minutes must be a number"
+                return (
+                    f"reminder snoozed: {parts[2]}"
+                    if self.snooze_reminder(parts[2], minutes)
+                    else f"unknown reminder: {parts[2]}"
+                )
+            return (
+                "usage: reminders on|off|status|list|history|"
+                "add TITLE SCHEDULE|remove ID|done ID|snooze ID [MINUTES]"
+            )
+        elif verb == "actions" and len(parts) > 1:
+            if parts[1] == "list":
+                return self.actions_summary()
+            if parts[1] == "run" and len(parts) >= 3:
+                return self.run_action(parts[2], announce=False).message
+            return "usage: actions list|run ID"
         elif verb == "focus" and len(parts) > 1:
             action = parts[1]
             if action == "status":
@@ -1005,13 +1284,30 @@ def build_parser() -> argparse.ArgumentParser:
         ("settings", "open the preferences window"),
     ):
         sub.add_parser(name, help=help_text)
-    remind = sub.add_parser("remind", help="fire a wellness reminder now")
-    remind.add_argument(
+    remind = sub.add_parser("remind", help="fire a reminder now")
+    remind.add_argument("value", help="reminder ID")
+    reminders = sub.add_parser("reminders", help="manage reminders")
+    reminders.add_argument(
         "value",
-        choices=("breakfast", "lunch", "snack", "dinner", "water", "break", "winddown"),
+        choices=(
+            "on",
+            "off",
+            "status",
+            "list",
+            "history",
+            "add",
+            "remove",
+            "done",
+            "snooze",
+        ),
     )
-    reminders = sub.add_parser("reminders", help="manage wellness reminders")
-    reminders.add_argument("value", choices=("on", "off", "status"))
+    reminders.add_argument("title", nargs="?", help="title or reminder ID")
+    reminders.add_argument(
+        "schedule", nargs="?", help="schedule phrase or snooze minutes"
+    )
+    actions = sub.add_parser("actions", help="list or run quick actions")
+    actions.add_argument("action", choices=("list", "run"))
+    actions.add_argument("action_id", nargs="?")
     focus = sub.add_parser("focus", help="control the focus timer")
     focus.add_argument(
         "action", choices=("start", "pause", "resume", "skip", "stop", "status")
@@ -1052,21 +1348,64 @@ def main(argv: list[str] | None = None) -> int:
             print("Desktop Buddy is not running.", file=sys.stderr)
             return 1
         if args.command == "reminders":
-            if args.value == "status":
-                reply = request_reply("reminders status")
+            if args.value in {"status", "list", "history"}:
+                reply = request_reply(f"reminders {args.value}")
                 if reply:
                     print(reply)
                     return 0
                 print("Desktop Buddy is not running.", file=sys.stderr)
                 return 1
-            if send_command(f"reminders {args.value}"):
+            if args.value in {"on", "off"} and send_command(f"reminders {args.value}"):
                 print(f"Reminders {args.value}")
                 return 0
-            config = Config.load()
-            config.reminders_enabled = args.value == "on"
-            config.save()
-            print(f"Reminders {args.value} (applies next time it starts)")
-            return 0
+            if args.value in {"on", "off"}:
+                config = Config.load()
+                config.reminders_enabled = args.value == "on"
+                config.save()
+                print(f"Reminders {args.value} (applies next time it starts)")
+                return 0
+            if not args.title:
+                parser.error(f"reminders {args.value} requires a reminder ID or title")
+            if args.value == "add":
+                if not args.schedule:
+                    parser.error("reminders add requires TITLE and SCHEDULE")
+                command = "reminders add " + " ".join(
+                    (shlex.quote(args.title), shlex.quote(args.schedule))
+                )
+            elif args.value == "snooze":
+                command = f"reminders snooze {shlex.quote(args.title)}"
+                if args.schedule:
+                    command += f" {shlex.quote(args.schedule)}"
+            else:
+                command = f"reminders {args.value} {shlex.quote(args.title)}"
+            reply = request_reply(command)
+            if reply:
+                print(reply)
+                return (
+                    0
+                    if not reply.startswith(("unknown", "could not", "invalid"))
+                    else 1
+                )
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
+        if args.command == "actions":
+            if args.action == "run" and not args.action_id:
+                parser.error("actions run requires an action ID")
+            command = f"actions {args.action}"
+            if args.action_id:
+                command += f" {shlex.quote(args.action_id)}"
+            reply = request_reply(command)
+            if reply:
+                print(reply)
+                return (
+                    0
+                    if not reply.startswith(
+                        ("Unknown", "Command action", "Action failed", "Could not")
+                    )
+                    else 1
+                )
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
         if args.command == "focus":
             command = f"focus {args.action}"
             if args.kind:

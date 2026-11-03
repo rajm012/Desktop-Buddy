@@ -147,22 +147,22 @@ Goal: allow users to configure Bolt around their own routine.
 
 ### Steps
 
-1. Replace fixed reminder fields with a general reminder model.
-2. Support one-time, daily, weekday and interval reminders.
-3. Add local parsing for phrases such as “in 20 minutes” and “weekdays at 9”.
-4. Add reminder history with done, missed and snoozed states.
-5. Create an action registry for safe built-in actions.
-6. Add configurable actions for launching applications, opening URLs and running
+1. [x] Replace fixed reminder fields with a general reminder model.
+2. [x] Support one-time, daily, weekday and interval reminders.
+3. [x] Add local parsing for phrases such as “in 20 minutes” and “weekdays at 9”.
+4. [x] Add reminder history with done, missed and snoozed states.
+5. [x] Create an action registry for safe built-in actions.
+6. [x] Add configurable actions for launching applications, opening URLs and running
    explicitly approved commands.
-7. Add confirmation and clear warning UI for custom commands.
-8. Expose reminders and actions through CLI and IPC.
+7. [x] Add confirmation and clear warning UI for custom commands.
+8. [x] Expose reminders and actions through CLI and IPC.
 
 ### Acceptance criteria
 
-- Existing wellness reminders migrate without data loss.
-- Custom commands never run unless explicitly configured by the user.
-- Reminder recurrence and time-zone behaviour are unit-tested.
-- Quiet hours prevent non-urgent interruptions.
+- [x] Existing wellness reminders migrate without data loss.
+- [x] Custom commands never run unless explicitly configured by the user.
+- [x] Reminder recurrence and time-zone behaviour are unit-tested.
+- [x] Quiet hours prevent non-urgent interruptions.
 
 ---
 
