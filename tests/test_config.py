@@ -281,8 +281,13 @@ class AutostartTests(unittest.TestCase):
             self.assertTrue(path.is_file())
             self.assertTrue(autostart_enabled(base))
             text = path.read_text(encoding="utf-8")
-            self.assertIn("[Desktop Entry]", text)
-            self.assertIn("Exec=", text)
+            if path.suffix == ".desktop":
+                self.assertIn("[Desktop Entry]", text)
+                self.assertIn("Exec=", text)
+            else:
+                self.assertEqual(path.suffix.lower(), ".vbs")
+                self.assertIn("WScript.Shell", text)
+                self.assertIn("shell.Run", text)
             set_autostart(False, base)
             self.assertFalse(autostart_enabled(base))
 

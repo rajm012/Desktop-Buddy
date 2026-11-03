@@ -85,7 +85,6 @@ class LinuxBackendTests(unittest.TestCase):
                 power_supply_root=Path(tmp),
             )
             for capability in (
-                Capability.ACTIVE_WINDOW,
                 Capability.ALWAYS_ON_TOP,
                 Capability.WORKSPACE_BEHAVIOR,
                 Capability.CLICK_THROUGH,
@@ -93,6 +92,11 @@ class LinuxBackendTests(unittest.TestCase):
             ):
                 with self.subTest(capability=capability):
                     self.assertTrue(backend.supports(capability))
+            active_window = backend.capability(Capability.ACTIVE_WINDOW)
+            if active_window.available:
+                self.assertTrue(backend.supports(Capability.ACTIVE_WINDOW))
+            else:
+                self.assertEqual(active_window.reason, "Xlib is unavailable.")
             audio = backend.capability(Capability.AUDIO)
             self.assertEqual(audio.available, backend.audio_available)
             if not audio.available:
