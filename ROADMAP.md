@@ -196,21 +196,21 @@ Goal: make Bolt useful while respecting user attention and privacy.
 
 ### Steps
 
-1. Add reliable idle-time and fullscreen detection to each desktop backend.
-2. Add per-application profiles and do-not-disturb rules.
-3. Add low-battery and network-state events.
-4. Add optional media controls through platform-native APIs.
-5. Add an optional calendar plugin with read-only access first.
-6. Add upcoming-event reminders and meeting-aware quiet mode.
-7. Show exactly which data each integration reads.
-8. Keep all integrations opt-in and local where possible.
+1. [x] Add reliable idle-time and fullscreen detection to each desktop backend.
+2. [x] Add per-application profiles and do-not-disturb rules.
+3. [x] Add low-battery and network-state events.
+4. [x] Add optional media controls through platform-native APIs.
+5. [x] Add an optional calendar plugin with read-only access first.
+6. [x] Add upcoming-event reminders and meeting-aware quiet mode.
+7. [x] Show exactly which data each integration reads.
+8. [x] Keep all integrations opt-in and local where possible.
 
 ### Acceptance criteria
 
-- Bolt does not interrupt fullscreen applications when suppression is enabled.
-- Revoking an integration's permission deactivates it cleanly.
-- Calendar credentials and tokens are stored using the operating-system keychain.
-- System polling has negligible idle CPU impact.
+- [x] Bolt does not interrupt fullscreen applications when suppression is enabled.
+- [x] Revoking an integration's permission deactivates it cleanly.
+- [x] Calendar credentials and tokens are stored using the operating-system keychain.
+- [x] System polling has negligible idle CPU impact.
 
 ---
 

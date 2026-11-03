@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QTabWidget,
@@ -669,7 +670,14 @@ class PreferencesDialog(QDialog):
         return spin
 
     def _build_integrations_tab(self) -> None:
-        _, layout = self._page("Integrations")
+        _, outer_layout = self._page("Integrations")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 4, 4, 4)
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
         intro = QLabel(
             "Background integrations are opt-in controls and can be disabled here."
         )
@@ -685,6 +693,68 @@ class PreferencesDialog(QDialog):
         )
         layout.addWidget(self.check_perch)
         layout.addWidget(self.check_autostart)
+        context_group = QGroupBox("Context awareness (opt-in)")
+        context_layout = QVBoxLayout(context_group)
+        context_notice = QLabel(
+            "Reads only idle duration, active app class/title, fullscreen state, "
+            "battery level, and optional local network state every 15 seconds. "
+            "Data stays in memory and is never uploaded."
+        )
+        context_notice.setWordWrap(True)
+        context_layout.addWidget(context_notice)
+        self.check_context = QCheckBox("Enable local context awareness")
+        self.check_context_fullscreen = QCheckBox(
+            "Suppress non-urgent reminders in fullscreen apps"
+        )
+        self.check_context_network = QCheckBox("Publish network-state changes")
+        self.check_context_battery = QCheckBox("Publish low-battery changes")
+        self.check_media = QCheckBox(
+            "Enable native media controls (active player/status only)"
+        )
+        for widget, setting in (
+            (self.check_context, "context_enabled"),
+            (self.check_context_fullscreen, "context_suppress_fullscreen"),
+            (self.check_context_network, "context_network_events"),
+            (self.check_context_battery, "context_low_battery_events"),
+            (self.check_media, "media_controls_enabled"),
+        ):
+            widget.toggled.connect(
+                lambda value, name=setting: self._on_context_setting(name, value)
+            )
+            context_layout.addWidget(widget)
+        threshold = QFormLayout()
+        self.low_battery_percent = QSpinBox()
+        self.low_battery_percent.setRange(5, 95)
+        self.low_battery_percent.setSuffix("%")
+        self.low_battery_percent.valueChanged.connect(
+            lambda value: self._on_context_setting("low_battery_percent", value)
+        )
+        threshold.addRow("Low-battery threshold", self.low_battery_percent)
+        context_layout.addLayout(threshold)
+        profile_form = QFormLayout()
+        self.profile_name = QLineEdit()
+        self.profile_class = QLineEdit()
+        self.profile_title = QLineEdit()
+        self.profile_name.setPlaceholderText("Video calls")
+        self.profile_class.setPlaceholderText("zoom or teams")
+        self.profile_title.setPlaceholderText("optional title text")
+        profile_form.addRow("Quiet profile", self.profile_name)
+        profile_form.addRow("App class contains", self.profile_class)
+        profile_form.addRow("Title contains", self.profile_title)
+        context_layout.addLayout(profile_form)
+        self.profile_list = QListWidget()
+        self.profile_list.setMaximumHeight(72)
+        context_layout.addWidget(self.profile_list)
+        profile_buttons = QHBoxLayout()
+        add_profile = QPushButton("Add profile")
+        remove_profile = QPushButton("Remove selected")
+        add_profile.clicked.connect(self._add_application_profile)
+        remove_profile.clicked.connect(self._remove_application_profile)
+        profile_buttons.addWidget(add_profile)
+        profile_buttons.addWidget(remove_profile)
+        profile_buttons.addStretch()
+        context_layout.addLayout(profile_buttons)
+        layout.addWidget(context_group)
         plugins_group = QGroupBox("Plugins")
         plugins_layout = QVBoxLayout(plugins_group)
         plugin_help = QLabel(
@@ -790,6 +860,11 @@ class PreferencesDialog(QDialog):
             Capability.BATTERY: "Battery status",
             Capability.AUDIO: "Audio playback",
             Capability.WORKSPACE_BEHAVIOR: "All-workspace visibility",
+            Capability.IDLE_TIME: "Idle-time detection",
+            Capability.FULLSCREEN: "Fullscreen detection",
+            Capability.NETWORK: "Network state",
+            Capability.MEDIA_CONTROLS: "Native media controls",
+            Capability.KEYCHAIN: "Secure credential storage",
         }
         for row, (capability, name) in enumerate(names.items()):
             self.capability_grid.addWidget(QLabel(name), row, 0)
@@ -866,6 +941,12 @@ class PreferencesDialog(QDialog):
         self.long_break_every.setValue(config.long_break_every)
         self.check_focus_quiet.setChecked(config.focus_respect_quiet_hours)
         self.check_focus_fullscreen.setChecked(config.focus_suppress_fullscreen)
+        self.check_context.setChecked(config.context_enabled)
+        self.check_context_fullscreen.setChecked(config.context_suppress_fullscreen)
+        self.check_context_network.setChecked(config.context_network_events)
+        self.check_context_battery.setChecked(config.context_low_battery_events)
+        self.low_battery_percent.setValue(config.low_battery_percent)
+        self.check_media.setChecked(config.media_controls_enabled)
         self.check_perch.setChecked(config.perch_on_windows)
         self.check_autostart.setChecked(self.controller.autostart_active())
         self.check_reminders.setChecked(config.reminders_enabled)
@@ -873,6 +954,7 @@ class PreferencesDialog(QDialog):
         self.refresh_reminders()
         self.refresh_actions()
         self.refresh_plugins()
+        self.refresh_application_profiles()
         self.preview.refresh()
 
     def _apply_capabilities(self) -> None:
@@ -884,6 +966,11 @@ class PreferencesDialog(QDialog):
             (self.check_chime, Capability.AUDIO),
             (self.check_autostart, Capability.AUTOSTART),
             (self.check_focus_fullscreen, Capability.ACTIVE_WINDOW),
+            (self.check_context_fullscreen, Capability.FULLSCREEN),
+            (self.check_context_network, Capability.NETWORK),
+            (self.check_context_battery, Capability.BATTERY),
+            (self.low_battery_percent, Capability.BATTERY),
+            (self.check_media, Capability.MEDIA_CONTROLS),
         )
         for widget, capability in controls:
             info = self.controller.backend.capability(capability)
@@ -951,6 +1038,39 @@ class PreferencesDialog(QDialog):
     def _on_reminder_sound(self, value: bool) -> None:
         if not self._loading:
             self.controller.set_reminder_sound(value)
+
+    def _on_context_setting(self, name: str, value: object) -> None:
+        if not self._loading:
+            self.controller.set_context_setting(name, value)
+
+    def refresh_application_profiles(self) -> None:
+        selected = self._selected_id(self.profile_list)
+        self.profile_list.clear()
+        for raw in self.controller.config.application_profiles:
+            if not isinstance(raw, dict):
+                continue
+            match = raw.get("class_contains") or raw.get("title_contains") or "?"
+            item = QListWidgetItem(f"{raw.get('name', 'Profile')} — {match}")
+            item.setData(Qt.ItemDataRole.UserRole, str(raw.get("id", "")))
+            self.profile_list.addItem(item)
+            if raw.get("id") == selected:
+                self.profile_list.setCurrentItem(item)
+
+    def _add_application_profile(self) -> None:
+        if self.controller.add_application_profile(
+            self.profile_name.text(),
+            self.profile_class.text(),
+            self.profile_title.text(),
+        ):
+            self.profile_name.clear()
+            self.profile_class.clear()
+            self.profile_title.clear()
+            self.refresh_application_profiles()
+
+    def _remove_application_profile(self) -> None:
+        profile_id = self._selected_id(self.profile_list)
+        if profile_id and self.controller.remove_application_profile(profile_id):
+            self.refresh_application_profiles()
 
     def refresh_reminders(self) -> None:
         selected = self._selected_id(self.reminder_list)
@@ -1046,10 +1166,12 @@ class PreferencesDialog(QDialog):
         )
         granted_text = ", ".join(sorted(item.value for item in granted)) or "none"
         capabilities = ", ".join(record.metadata.required_capabilities) or "none"
+        data_access = "; ".join(record.metadata.data_access) or "none declared"
         text = (
             f"{record.metadata.description or 'No description.'}\n"
             f"Permissions: {granted_text} / requested {requested}\n"
-            f"Required capabilities: {capabilities}"
+            f"Required capabilities: {capabilities}\n"
+            f"Data read: {data_access}"
         )
         if record.error:
             text += f"\nError: {record.error}"

@@ -6,7 +6,7 @@ This file is the operational handbook for coding agents working in this reposito
 
 Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local custom reminders, safe quick actions, a focus timer, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
 
-Current package version: `1.6.0`.
+Current package version: `1.7.0`.
 
 Primary supported environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows and macOS currently use the generic backend and are roadmap work, not supported native implementations.
 
@@ -21,30 +21,36 @@ Guiding product rules:
 
 ## 2. Current development status
 
-Last verified: 2026-11-03 on branch `main` at commit `6f057a3`.
+Last verified: 2026-11-03 on branch `main` at commit `87de701` plus the
+uncommitted Phase 6 implementation described below.
 
 Repository state at handoff:
 
 - `main` is synchronized with `origin/main`.
-- The working tree was clean before this guide was added.
+- The working tree contains the uncommitted Phase 6 implementation and its
+  documentation/tests; preserve it unless the user explicitly asks to commit or
+  discard it.
 - Phase 0 is complete: stable baseline, migrations, CI, renderer/CLI/IPC tests, screenshots, and performance measurements.
 - Phase 1 is complete: platform backend abstraction and Linux/X11 isolation.
 - Phase 2 is complete: tabbed preferences, onboarding, capability status, attention controls, config import/export/reset, and animation previews.
 - Phase 3 is complete: pure focus state machine, configurable focus/break durations, tray/CLI/IPC actions, restoration, daily history, character feedback, and attention suppression.
 - Phase 4 is complete: general reminders, local schedule parsing, outcome history, safe quick actions, explicit command approval, Preferences/tray integration, and CLI/IPC controls.
 - Phase 5 is complete: plugin API 1, event bus, limited contribution APIs, built-in/external discovery, permissions, failure isolation, and management UI/CLI.
-- Phases 6 through 11 have not started.
+- Phase 6 is complete: opt-in context polling, app profiles, fullscreen/idle/battery/network events, native media controls, keychain hooks, and a read-only local calendar plugin.
+- Phases 7 through 11 have not started.
 
-Important history note: commit `6f057a3` is titled `phase-3`, but its actual changes completed Phase 2. The focus timer was implemented in the working tree after that commit; use current code and tests rather than the old commit name.
+History is now represented by the Phase 3, Phase 4, and Phase 5 commits ending at
+`87de701`; use the current code and tests rather than the older ambiguous commit
+titles.
 
 Verification at handoff:
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
-- Unit/smoke tests: 137 passing.
+- Unit/smoke tests: 144 passing.
 - Source distribution and wheel build: passing.
 
-The next roadmap task is Phase 6, Step 1: add reliable idle-time and fullscreen detection to each desktop backend. Read the Phase 5 reference below before implementing integrations; system features should publish events through the plugin boundary where appropriate.
+The next roadmap task is Phase 7, Step 1: implement the native Windows backend. Preserve the Phase 6 capability contract and keep unavailable features explicit while the backend is incomplete.
 
 ## 3. Repository map
 
@@ -77,6 +83,8 @@ The next roadmap task is Phase 6, Step 1: add reliable idle-time and fullscreen 
 | `desktop_buddy/config.py` | Config dataclass, validation, migration, atomic JSON persistence, themes/species. |
 | `desktop_buddy/wellness.py` | Pure general reminder model, recurrence, local phrase parsing, scheduling, snooze, and outcome history. |
 | `desktop_buddy/actions.py` | Pure validation and permission-aware registry for built-in, application, URL, and command actions. |
+| `desktop_buddy/context.py` | Pure context snapshots, per-application matching, change events, and attention policy. |
+| `desktop_buddy/calendar_integration.py` | Pure read-only iCalendar parsing and current/upcoming event queries. |
 | `desktop_buddy/plugins.py` | Pure plugin metadata, compatibility, event bus, permissions, lifecycle, failure isolation, and external discovery. |
 | `desktop_buddy/builtin_plugins.py` | Optional built-ins implemented through the same limited API as external plugins. |
 | `desktop_buddy/focus.py` | Pure focus/break state machine, versioned state, restoration, and daily history. |
@@ -167,7 +175,7 @@ Focus runtime/history data is kept separate from preferences in a versioned, ato
 
 ## 6. Platform capability rules
 
-`PlatformBackend` is the only supported boundary for operating-system services. The capability enum currently covers paths, autostart, battery, active windows, always-on-top, workspace behavior, click-through, audio, and diagnostics.
+`PlatformBackend` is the only supported boundary for operating-system services. The capability enum covers paths, autostart, battery, active windows, always-on-top, workspace behavior, click-through, audio, diagnostics, idle time, fullscreen state, network state, media controls, and keychain storage.
 
 When adding a platform-dependent feature:
 
@@ -193,7 +201,7 @@ Do not assume X11 merely because the OS is Linux. Wayland limitations are an exp
 - Keep dialogs usable on common laptop screens.
 - Preserve high-DPI behavior; the renderer and geometry operate in logical pixels and Qt handles device scaling.
 
-The Reminders tab edits general schedules and displays outcome history. The Integrations tab edits quick actions, owns command approval, and manages plugin permissions/enablement. Enabled plugins may add settings tabs. The Focus tab provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep these controls synchronized with tray and CLI behavior.
+The Reminders tab edits general schedules and displays outcome history. The Integrations tab owns opt-in context settings, app quiet profiles, media enablement, quick actions, and plugin permissions/enablement. Enabled plugins may add settings tabs. The Focus tab provides live state, actions, durations, cadence, attention settings, and seven-day history. Keep these controls synchronized with tray and CLI behavior.
 
 ## 8. Development commands
 
@@ -379,7 +387,7 @@ Phase 5 is complete. Plugin API 1 is the stable extension boundary for later opt
 ### Permissions and limited host APIs
 
 - Config schema 5 stores per-plugin `enabled` state and granted permission names under `plugins`.
-- Permissions are `actions`, `reminders`, `tray`, `settings`, and `events`. All declared permissions must be explicitly granted before activation.
+- Permissions are `actions`, `reminders`, `tray`, `settings`, `events`, `calendar`, and `media`. All declared permissions must be explicitly granted before activation.
 - Plugins may also require platform capability values such as `audio`, `active_window`, or `battery`; activation is blocked when unavailable.
 - Contributions are automatically namespaced with the plugin ID and removed on disable/failure/reload.
 - Plugin reminders are merged into a copied wellness config only while active; plugins do not mutate the persisted user reminder list.
@@ -409,9 +417,70 @@ Phase 5 is complete. Plugin API 1 is the stable extension boundary for later opt
 - `tests/test_prefs_smoke.py` covers plugin controls and contributed settings pages.
 - `tests/test_config.py` covers schema-5 migration, normalization, and deep-copy transactions.
 
-All eight Phase 5 steps and acceptance criteria are checked in `ROADMAP.md`. The next handoff is Phase 6: context awareness and system integrations. Prefer publishing new system state as events and implementing optional consumers as plugins.
+All eight Phase 5 steps and acceptance criteria are checked in `ROADMAP.md`.
 
-## 13. Known constraints and common pitfalls
+## 13. Phase 6 implementation reference
+
+Phase 6 is complete. Context awareness is opt-in and the controller polls at a
+fixed 15-second interval only when enabled. The timer still publishes a minimal
+tick when disabled so an enabled local plugin can refresh without probing OS
+context.
+
+### Context and attention policy
+
+- `context.py` is pure Python. `ContextEngine` accepts probe results, matches the
+  first enabled `ApplicationProfile`, creates immutable snapshots, and emits only
+  changed system events.
+- App profiles use case-insensitive class/title substring matching. They may
+  suppress non-urgent attention and pause animation without overwriting the
+  user's manual pause setting.
+- Non-urgent reminders respect matching profiles, fullscreen suppression, and
+  meeting-aware quiet mode. Urgent reminders remain allowed. Focus completion
+  uses the same context snapshot when context monitoring is enabled.
+- Core Phase 6 events are `system.context`, `system.fullscreen`,
+  `system.active_application`, `system.low_battery`, `system.network`,
+  `calendar.upcoming`, and `calendar.meeting`.
+
+### Platform services
+
+- Linux/X11 idle time uses XScreenSaver; fullscreen uses the existing EWMH
+  active-window probe. Generic/unsupported backends return safe unavailable
+  capabilities.
+- Network state reads `/sys/class/net` only and never performs a connectivity
+  request. Battery status now includes a normalized percentage.
+- Linux media controls use session D-Bus/MPRIS through `gdbus`. They are disabled
+  by default and exposed through Tray → Media and `desktop-buddy media ...`.
+- Secret storage uses Secret Service through `secret-tool`. Any future provider
+  credentials must use `store_secret`/`read_secret`/`delete_secret`; never store
+  tokens in config.
+
+### Local Calendar plugin
+
+- `local-calendar` is a disabled-by-default built-in requiring `calendar`,
+  `reminders`, `settings`, and `events` grants.
+- It reads only configured local `.ics`/`.ical` files, never modifies them, and
+  ignores descriptions, attendees, and contacts.
+- It registers one-time reminders for events in the next seven days and emits
+  current-meeting state. Permission revocation removes reminders, settings, and
+  event subscriptions through normal plugin cleanup.
+- Plugin metadata has `data_access`; Preferences and CLI info show the exact
+  declared data categories. See `docs/CONTEXT_INTEGRATIONS.md`.
+
+### Phase 6 test coverage
+
+- `tests/test_context.py` covers app matching, stable change events, fullscreen
+  and meeting attention policy, iCalendar parsing, upcoming/current queries,
+  calendar activation, permission revocation, and cleanup.
+- `tests/test_platform_backend.py` covers battery percentages, local network
+  state, capability isolation, and existing X11/Wayland behavior.
+- Existing config, controller/IPC, Preferences, plugin, and reminder tests cover
+  migrations and regression boundaries. The complete suite has 144 tests.
+
+All eight Phase 6 steps and acceptance criteria are checked in `ROADMAP.md`. The
+next handoff is Phase 7: a native Windows backend using the expanded capability
+contract.
+
+## 14. Known constraints and common pitfalls
 
 - Linux/X11 is the only full desktop backend today.
 - Wayland cannot reliably support arbitrary positioning, click-through, global window inspection, or forced always-on-top using standard Qt alone.
@@ -428,7 +497,7 @@ All eight Phase 5 steps and acceptance criteria are checked in `ROADMAP.md`. The
 - Do not describe plugin permissions as a Python/OS sandbox; external plugins execute with the user's account.
 - Do not import external plugin modules during discovery or allow entrypoints outside their plugin directory.
 
-## 14. Agent workflow
+## 15. Agent workflow
 
 For every task:
 

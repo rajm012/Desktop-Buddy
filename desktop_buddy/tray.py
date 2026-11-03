@@ -114,6 +114,19 @@ class BuddyTray(QObject):
         self.plugin_items_menu = menu.addMenu("Plugins")
         self._refresh_plugin_items()
 
+        self.media_menu = menu.addMenu("Media")
+        self.media_status_action = self.media_menu.addAction("Status unavailable")
+        self.media_status_action.setEnabled(False)
+        self.media_menu.addSeparator()
+        self.media_menu.addAction(
+            "Play / Pause", lambda: controller.media_command("play-pause")
+        )
+        self.media_menu.addAction(
+            "Previous", lambda: controller.media_command("previous")
+        )
+        self.media_menu.addAction("Next", lambda: controller.media_command("next"))
+        self.media_menu.addAction("Stop", lambda: controller.media_command("stop"))
+
         self.focus_menu = menu.addMenu("Focus")
         self.act_focus_status = self.focus_menu.addAction("Ready")
         self.act_focus_status.setEnabled(False)
@@ -223,6 +236,20 @@ class BuddyTray(QObject):
         self.act_chime.setChecked(config.reminder_sound)
         self._refresh_quick_actions()
         self._refresh_plugin_items()
+        media_available = (
+            config.media_controls_enabled
+            and self.controller.backend.supports(Capability.MEDIA_CONTROLS)
+        )
+        self.media_menu.setEnabled(media_available)
+        if media_available:
+            status = self.controller.backend.media_status()
+            self.media_status_action.setText(
+                f"{status.playback.title()} — {status.player}"
+                if status.available
+                else "No compatible player"
+            )
+        else:
+            self.media_status_action.setText("Media controls disabled")
         self.act_autostart.setChecked(self.controller.autostart_active())
         focus = self.controller._focus  # noqa: SLF001 - tray is a controller view
         focus_status = focus.state.status

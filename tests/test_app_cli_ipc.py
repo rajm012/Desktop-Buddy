@@ -254,6 +254,7 @@ class CliParserTests(unittest.TestCase):
             (["click-through", "on"], ("click-through", "on")),
             (["autostart", "off"], ("autostart", "off")),
             (["focus", "start", "long-break"], ("focus", "start")),
+            (["media", "play-pause"], ("media", "play-pause")),
         )
         for argv, expected in cases:
             with self.subTest(argv=argv):

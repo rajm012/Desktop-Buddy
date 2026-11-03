@@ -7,11 +7,13 @@ import ctypes.util
 import logging
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Mapping
 
 from .. import APP_SLUG
+from ..context import MediaStatus, NetworkState, NetworkStatus
 from .base import (
     ActiveWindowProbe,
     BatteryStatus,
@@ -54,6 +56,17 @@ TERMINAL_KEYS = (
 )
 
 _X_ERROR_HANDLER_TYPE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+
+
+class _XScreenSaverInfo(ctypes.Structure):
+    _fields_ = [
+        ("window", ctypes.c_ulong),
+        ("state", ctypes.c_int),
+        ("kind", ctypes.c_int),
+        ("since", ctypes.c_ulong),
+        ("idle", ctypes.c_ulong),
+        ("event_mask", ctypes.c_ulong),
+    ]
 
 
 @_X_ERROR_HANDLER_TYPE
@@ -332,12 +345,14 @@ class LinuxBackend(PlatformBackend):
         config_root: Path | None = None,
         state_root: Path | None = None,
         power_supply_root: Path = Path("/sys/class/power_supply"),
+        network_root: Path = Path("/sys/class/net"),
     ) -> None:
         super().__init__()
         self.env = env if env is not None else os.environ
         self._config_root = config_root
         self._state_root = state_root
         self.power_supply_root = power_supply_root
+        self.network_root = network_root
 
     @property
     def name(self) -> str:
@@ -374,6 +389,9 @@ class LinuxBackend(PlatformBackend):
         session = self.session_type()
         x11 = session == "x11" and bool(self.env.get("DISPLAY"))
         active_window = x11 and ctypes.util.find_library("X11") is not None
+        idle_time = active_window and ctypes.util.find_library("Xss") is not None
+        gdbus = shutil.which("gdbus") is not None
+        secret_tool = shutil.which("secret-tool") is not None
         wayland_reason = (
             "The current Wayland session does not expose this window-control "
             "capability; use an X11 session for full support."
@@ -405,6 +423,36 @@ class LinuxBackend(PlatformBackend):
                 else "",
             ),
             Capability.SESSION_DIAGNOSTICS: CapabilityInfo(True),
+            Capability.IDLE_TIME: CapabilityInfo(
+                idle_time,
+                "Idle time requires the XScreenSaver extension on Linux/X11."
+                if not idle_time
+                else "",
+            ),
+            Capability.FULLSCREEN: CapabilityInfo(
+                active_window,
+                "Fullscreen detection requires active-window access on Linux/X11."
+                if not active_window
+                else "",
+            ),
+            Capability.NETWORK: CapabilityInfo(
+                self.network_root.is_dir(),
+                "Linux network interface state is unavailable."
+                if not self.network_root.is_dir()
+                else "",
+            ),
+            Capability.MEDIA_CONTROLS: CapabilityInfo(
+                gdbus,
+                "Media controls require the gdbus command and an MPRIS player."
+                if not gdbus
+                else "",
+            ),
+            Capability.KEYCHAIN: CapabilityInfo(
+                secret_tool,
+                "Secure credential storage requires Secret Service and secret-tool."
+                if not secret_tool
+                else "",
+            ),
         }
 
     def launcher_path(self) -> Path:
@@ -470,9 +518,213 @@ class LinuxBackend(PlatformBackend):
             except OSError:
                 continue
             return BatteryStatus(
-                status.lower() == "discharging", f"{capacity}% ({status})"
+                status.lower() == "discharging",
+                f"{capacity}% ({status})",
+                int(capacity) if capacity.isdigit() else None,
             )
         return BatteryStatus(False, "unknown")
+
+    def idle_seconds(self) -> float | None:
+        if not self.supports(Capability.IDLE_TIME):
+            return None
+        x11 = None
+        display = None
+        info = None
+        try:
+            x11 = ctypes.CDLL("libX11.so.6")
+            xss = ctypes.CDLL("libXss.so.1")
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_XScreenSaverInfo)
+            xss.XScreenSaverQueryInfo.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.POINTER(_XScreenSaverInfo),
+            ]
+            xss.XScreenSaverQueryInfo.restype = ctypes.c_int
+            x11.XFree.argtypes = [ctypes.c_void_p]
+            display = x11.XOpenDisplay(None)
+            if not display:
+                return None
+            info = xss.XScreenSaverAllocInfo()
+            if not info:
+                return None
+            root = x11.XDefaultRootWindow(display)
+            if not xss.XScreenSaverQueryInfo(display, root, info):
+                return None
+            return max(0.0, float(info.contents.idle) / 1000.0)
+        except Exception:  # noqa: BLE001 - native capability boundary
+            log.debug("Could not query X11 idle time", exc_info=True)
+            return None
+        finally:
+            if info is not None and x11 is not None:
+                x11.XFree(info)
+            if display is not None and x11 is not None:
+                x11.XCloseDisplay(display)
+
+    def network_status(self) -> NetworkStatus:
+        if not self.network_root.is_dir():
+            return NetworkStatus()
+        candidates: list[str] = []
+        for entry in sorted(self.network_root.iterdir()):
+            if entry.name == "lo":
+                continue
+            try:
+                state = (entry / "operstate").read_text(encoding="utf-8").strip()
+                carrier_path = entry / "carrier"
+                carrier = (
+                    carrier_path.read_text(encoding="utf-8").strip()
+                    if carrier_path.is_file()
+                    else "1"
+                )
+            except OSError:
+                continue
+            candidates.append(entry.name)
+            if state in {"up", "unknown"} and carrier != "0":
+                return NetworkStatus(NetworkState.ONLINE, entry.name)
+        return NetworkStatus(
+            NetworkState.OFFLINE,
+            candidates[0] if candidates else "",
+        )
+
+    def _mpris_player(self) -> str | None:
+        if not self.supports(Capability.MEDIA_CONTROLS):
+            return None
+        result = self._run_command(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.DBus",
+                "--object-path",
+                "/org/freedesktop/DBus",
+                "--method",
+                "org.freedesktop.DBus.ListNames",
+            ]
+        )
+        if result is None:
+            return None
+        marker = "org.mpris.MediaPlayer2."
+        names = [part.strip(" '[](),") for part in result.split(",")]
+        return next((name for name in names if name.startswith(marker)), None)
+
+    def media_status(self) -> MediaStatus:
+        player = self._mpris_player()
+        if not player:
+            return MediaStatus()
+        result = self._run_command(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                player,
+                "--object-path",
+                "/org/mpris/MediaPlayer2",
+                "--method",
+                "org.freedesktop.DBus.Properties.Get",
+                "org.mpris.MediaPlayer2.Player",
+                "PlaybackStatus",
+            ]
+        )
+        playback = "unknown"
+        if result:
+            for value in ("Playing", "Paused", "Stopped"):
+                if value in result:
+                    playback = value.lower()
+                    break
+        return MediaStatus(True, player, playback)
+
+    def media_control(self, action: str) -> bool:
+        methods = {
+            "play-pause": "PlayPause",
+            "next": "Next",
+            "previous": "Previous",
+            "stop": "Stop",
+        }
+        method = methods.get(str(action))
+        player = self._mpris_player()
+        if not method or not player:
+            return False
+        return (
+            self._run_command(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    player,
+                    "--object-path",
+                    "/org/mpris/MediaPlayer2",
+                    "--method",
+                    f"org.mpris.MediaPlayer2.Player.{method}",
+                ]
+            )
+            is not None
+        )
+
+    def store_secret(self, key: str, value: str) -> bool:
+        if not self.supports(Capability.KEYCHAIN):
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "secret-tool",
+                    "store",
+                    "--label=Desktop Buddy integration",
+                    "application",
+                    APP_SLUG,
+                    "key",
+                    str(key),
+                ],
+                input=str(value),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0
+
+    def read_secret(self, key: str) -> str | None:
+        if not self.supports(Capability.KEYCHAIN):
+            return None
+        return self._run_command(
+            ["secret-tool", "lookup", "application", APP_SLUG, "key", str(key)]
+        )
+
+    def delete_secret(self, key: str) -> bool:
+        if not self.supports(Capability.KEYCHAIN):
+            return False
+        return (
+            self._run_command(
+                ["secret-tool", "clear", "application", APP_SLUG, "key", str(key)]
+            )
+            is not None
+        )
+
+    @staticmethod
+    def _run_command(command: list[str]) -> str | None:
+        try:
+            result = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
 
     def create_active_window_probe(self) -> ActiveWindowProbe:
         return X11WindowProbe(self.env)
@@ -560,6 +812,12 @@ class LinuxBackend(PlatformBackend):
             if self._libxcb_cursor_available()
             else "MISSING",
             "battery": f"{status.label} | on battery: {status.on_battery}",
+            "idle seconds": self.idle_seconds(),
+            "network": self.network_status().state.value,
+            "media": self.media_status().playback,
+            "keychain": "available"
+            if self.supports(Capability.KEYCHAIN)
+            else "unavailable",
             "active window": active,
             "launcher": self.launcher_description(),
             "autostart": "enabled" if autostart else "disabled",

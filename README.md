@@ -39,6 +39,12 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - **Quick actions**: attach safe built-ins, application launches, URLs, or an
   explicitly approved command to a reminder; command execution never uses a shell
 - **Permissioned plugins**: optional built-in and external plugins can add namespaced actions, reminders, tray items, settings pages, and event handlers; faulty plugins are disabled without taking down the buddy
+- **Opt-in context awareness**: low-frequency local idle, fullscreen, active-app,
+  battery, and network state with per-application quiet profiles
+- **Native media controls**: optional Linux MPRIS play/pause, previous, next, and
+  stop controls through the tray or CLI
+- **Read-only local calendar**: an optional built-in plugin reads configured
+  iCalendar files for upcoming reminders and meeting-aware quiet mode
 - **Focus timer**: configurable focus, short-break and long-break sessions with start, pause, resume, skip and stop controls in Preferences, the tray and CLI
 - Active or paused focus sessions survive restarts; completed focus sessions are
   recorded locally with a compact seven-day history and daily totals
@@ -99,6 +105,7 @@ Then:
 | Quick actions | Preferences → Integrations or tray → Quick actions |
 | Plugins | Preferences → Integrations → Plugins or `desktop-buddy plugins list` |
 | Focus timer | Tray → Focus, Preferences → Focus, or `desktop-buddy focus start` |
+| Context and media | Preferences → Integrations; tray → Media |
 | Preferences | Tray menu → Preferences… (or `desktop-buddy settings`) |
 
 ### Command line
@@ -122,6 +129,7 @@ desktop-buddy plugins enable PLUGIN_ID [PERMISSIONS...]
 desktop-buddy plugins disable PLUGIN_ID
 desktop-buddy focus start [focus|short-break|long-break]
 desktop-buddy focus pause|resume|skip|stop|status
+desktop-buddy media status|play-pause|previous|next|stop
 desktop-buddy click-through on|off     # let clicks pass through to apps below
 desktop-buddy autostart on|off|status
 desktop-buddy --diagnose               # environment/support report
@@ -139,7 +147,7 @@ but hand-editable too):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `schema_version` | `5` | Persisted-format version used for automatic upgrades |
+| `schema_version` | `6` | Persisted-format version used for automatic upgrades |
 | `name` | `"Bolt"` | Displayed in the greeting/about |
 | `species` | `"robot"` | `robot` (Bolt), `ghost` (Boo) or `mochi` (the cat) |
 | `theme` | `"circuit"` | `circuit`, `mint`, `peach`, `lavender`, `sky`, `sakura`, `charcoal` |
@@ -171,6 +179,16 @@ but hand-editable too):
 | `long_break_every` | `4` | Completed focus sessions between long breaks |
 | `focus_respect_quiet_hours` | `true` | Suppress completion alerts outside active hours |
 | `focus_suppress_fullscreen` | `true` | Suppress completion alerts over fullscreen apps when detection is available |
+| `context_enabled` | `false` | Enable 15-second local context polling |
+| `context_suppress_fullscreen` | `true` | Suppress non-urgent reminders in fullscreen apps |
+| `context_network_events` | `false` | Publish online/offline interface changes |
+| `context_low_battery_events` | `false` | Publish low-battery state changes |
+| `low_battery_percent` | `20` | Low-battery event threshold |
+| `application_profiles` | `[]` | Local active-app/title quiet rules |
+| `media_controls_enabled` | `false` | Allow native media controls |
+| `calendar_sources` | `[]` | Local `.ics`/`.ical` files read by the calendar plugin |
+| `calendar_reminder_minutes` | `10` | Minutes before an event to remind |
+| `calendar_meeting_quiet` | `true` | Silence non-urgent interruptions during meetings |
 | `position_x` | auto | Last position on screen |
 
 Live focus state and history are stored separately in
@@ -182,6 +200,9 @@ stored in `~/.local/state/desktop-buddy/reminders.json`. Reminder and focus time
 use deterministic local wall-clock values and require no network service.
 
 External plugins are discovered under `~/.config/desktop-buddy/plugins/<plugin-id>/`. Their manifests are read at startup, but Python code is imported only after explicit permission grants and enablement. Permissions constrain Desktop Buddy APIs, not the operating system; review external source before enabling it. See [the plugin API guide](docs/PLUGIN_API.md).
+
+Phase 6 integration data, polling, privacy, and backend behavior are documented
+in [the context and integrations guide](docs/CONTEXT_INTEGRATIONS.md).
 
 ## Performance
 
@@ -201,7 +222,7 @@ Summary:
 The window is only ~112 × 128 logical pixels, so even where it overlaps other
 windows it blocks almost nothing.
 
-The reminder scheduler wakes every 20 seconds. The focus controller checks its absolute deadline once per second; neither scheduler is tied to animation FPS.
+The reminder scheduler wakes every 20 seconds. The focus controller checks its absolute deadline once per second; neither scheduler is tied to animation FPS. Context polling is disabled by default and, when enabled, runs once every 15 seconds using short native queries. Network polling reads local interface files and performs no connectivity request.
 
 ## Troubleshooting
 
@@ -281,6 +302,8 @@ desktop_buddy/
   wellness.py       general reminder schedules, parsing and history (pure)
   focus.py          focus/break state machine, persistence and history (pure)
   actions.py        validated, permission-aware quick action registry (pure)
+  context.py        pure context snapshots, app profiles and attention policy
+  calendar_integration.py read-only local iCalendar parser and queries
   plugins.py        metadata, event bus, permissions, discovery and lifecycle
   builtin_plugins.py optional built-ins using the public plugin context
   toast.py          reminder card with Done/Snooze next to the buddy
@@ -310,6 +333,16 @@ The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
+
+**1.7.0**
+- Added opt-in, 15-second context polling with Linux/X11 idle and fullscreen
+  detection, local network and low-battery events, and per-application quiet rules.
+- Added optional native MPRIS media controls in the tray and CLI plus Secret
+  Service keychain hooks for integrations that need credentials.
+- Added a disabled-by-default, read-only Local Calendar plugin with upcoming
+  event reminders, meeting-aware quiet mode, and explicit data-access disclosures.
+- Context, media, and calendar data remain local; unsupported capabilities are
+  reported and disabled instead of using unreliable fallbacks.
 
 **1.6.0**
 - Added plugin API 1 with versioned metadata, lifecycle, app compatibility, required platform capabilities, and per-plugin permissions.

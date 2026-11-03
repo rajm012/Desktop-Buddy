@@ -185,6 +185,33 @@ class ConfigTests(unittest.TestCase):
             },
         )
 
+    def test_phase_five_config_migrates_opt_in_context_defaults(self) -> None:
+        config = Config.from_dict({"schema_version": 5})
+        self.assertFalse(config.context_enabled)
+        self.assertFalse(config.media_controls_enabled)
+        self.assertEqual(config.application_profiles, [])
+        self.assertEqual(config.calendar_sources, [])
+        self.assertEqual(config.low_battery_percent, 20)
+
+    def test_context_profiles_sources_and_thresholds_are_normalized(self) -> None:
+        config = Config.from_dict(
+            {
+                "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+                "low_battery_percent": 200,
+                "calendar_reminder_minutes": -3,
+                "calendar_sources": [" work.ics ", "work.ics", ""],
+                "application_profiles": [
+                    {"id": "meet", "name": "Meet", "class_contains": "zoom"},
+                    {"id": "meet", "name": "Duplicate", "title_contains": "x"},
+                    {"id": "bad", "name": "No matcher"},
+                ],
+            }
+        )
+        self.assertEqual(config.low_battery_percent, 95)
+        self.assertEqual(config.calendar_reminder_minutes, 0)
+        self.assertEqual(config.calendar_sources, ["work.ics"])
+        self.assertEqual(len(config.application_profiles), 1)
+
     def test_invalid_and_duplicate_phase_four_definitions_are_removed(self) -> None:
         config = Config.from_dict(
             {

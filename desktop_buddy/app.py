@@ -26,6 +26,7 @@ from . import APP_SLUG, __version__
 from .actions import ActionDefinition, ActionRegistry
 from .character import Palette
 from .config import CONFIG_PATH, LOG_PATH, SPECIES, Config
+from .context import ContextEngine, NetworkStatus, profiles_from_config
 from .focus import (
     FocusEngine,
     FocusEvent,
@@ -210,6 +211,10 @@ class Controller(QObject):
         self._plugin_settings_pages: dict[
             str, tuple[str, str, Callable[..., object]]
         ] = {}
+        self._meeting_active = False
+        self._meeting_title = ""
+        self._context = Controller._build_context_engine(self)
+        self._context_paused = False
         self._wellness = self._build_wellness()
         self._focus = FocusEngine(
             FocusSettings.from_config(self.config),
@@ -243,12 +248,17 @@ class Controller(QObject):
         self._focus_timer.setInterval(1000)
         self._focus_timer.timeout.connect(self._check_focus)
         self._focus_timer.start()
+        self._context_timer = QTimer(self)
+        self._context_timer.setInterval(15_000)
+        self._context_timer.timeout.connect(self._check_context)
+        self._context_timer.start()
         self._server = self._start_ipc()
 
         if self.tray.icon is not None:
             self.tray.icon.show()
         self.window.show()
         QTimer.singleShot(200, self._check_focus)
+        QTimer.singleShot(1200, self._check_context)
         QTimer.singleShot(6000, self._check_reminders)
         if first_run:
             QTimer.singleShot(700, self.open_onboarding)
@@ -286,6 +296,7 @@ class Controller(QObject):
         self._rebuild_wellness()
         self._rebuild_focus()
         getattr(self, "_rebuild_actions", lambda: None)()
+        self._context = Controller._build_context_engine(self)
         self.tray.refresh()
         self._schedule_save()
 
@@ -302,12 +313,13 @@ class Controller(QObject):
         self._rebuild_wellness()
         self._rebuild_focus()
         getattr(self, "_rebuild_actions", lambda: None)()
+        self._context = Controller._build_context_engine(self)
         self.tray.refresh()
         self._schedule_save()
 
     # ---------------------------------------------------------------- plugins
     def _build_plugins(self) -> PluginManager:
-        from .builtin_plugins import BUILTIN_PLUGINS
+        from .builtin_plugins import builtins_for
 
         available = {
             capability.value
@@ -328,7 +340,8 @@ class Controller(QObject):
             state_changed=self._plugin_state_changed,
             logger=log,
         )
-        for metadata, factory in BUILTIN_PLUGINS:
+        manager.events.subscribe("__core__", "calendar.meeting", self._calendar_event)
+        for metadata, factory in builtins_for(self.config, self._schedule_save):
             manager.register_builtin(metadata, factory)
         manager.discover_external([self.backend.paths().config_dir / "plugins"])
         manager.load_enabled()
@@ -482,6 +495,7 @@ class Controller(QObject):
         requested = ", ".join(item.value for item in metadata.permissions) or "none"
         granted_text = ", ".join(sorted(item.value for item in granted)) or "none"
         capabilities = ", ".join(metadata.required_capabilities) or "none"
+        data_access = "; ".join(metadata.data_access) or "none declared"
         return (
             f"{metadata.name} {metadata.version} ({metadata.id})\n"
             f"Status: {record.status.value}\n"
@@ -489,6 +503,7 @@ class Controller(QObject):
             f"Permissions requested: {requested}\n"
             f"Permissions granted: {granted_text}\n"
             f"Required capabilities: {capabilities}\n"
+            f"Data read: {data_access}\n"
             f"{metadata.description}"
             + (f"\nError: {record.error}" if record.error else "")
         )
@@ -498,10 +513,92 @@ class Controller(QObject):
         if manager is not None:
             manager.events.emit(event_name, payload)
 
+    def _calendar_event(self, event) -> None:  # noqa: ANN001
+        self._meeting_active = bool(event.payload.get("active", False))
+        self._meeting_title = str(event.payload.get("title", ""))[:120]
+
+    def _build_context_engine(self) -> ContextEngine:
+        return ContextEngine(
+            profiles_from_config(self.config.application_profiles),
+            self.config.low_battery_percent,
+        )
+
+    def _check_context(self) -> None:
+        if not self.config.context_enabled:
+            self._emit_plugin_event(
+                "system.context", timestamp=datetime.now().isoformat()
+            )
+            return
+        active_class = ""
+        active_title = ""
+        fullscreen = False
+        if self.backend.supports(Capability.ACTIVE_WINDOW):
+            probe = self.backend.create_active_window_probe()
+            try:
+                info = probe.active_window() if probe.available else None
+                if info is not None:
+                    active_class = info.class_name
+                    active_title = info.title
+                    fullscreen = info.fullscreen
+            finally:
+                probe.close()
+        idle_seconds = (
+            self.backend.idle_seconds()
+            if self.backend.supports(Capability.IDLE_TIME)
+            else None
+        )
+        battery = self.backend.battery_status()
+        network = (
+            self.backend.network_status()
+            if self.config.context_network_events
+            and self.backend.supports(Capability.NETWORK)
+            else NetworkStatus()
+        )
+        changes = self._context.update(
+            idle_seconds=idle_seconds,
+            fullscreen=fullscreen,
+            active_class=active_class,
+            active_title=active_title,
+            on_battery=battery.on_battery,
+            battery_percent=battery.percent,
+            network=network,
+            meeting_active=self._meeting_active,
+            meeting_title=self._meeting_title,
+        )
+        for change in changes:
+            if (
+                change.name == "system.network"
+                and not self.config.context_network_events
+            ):
+                continue
+            if (
+                change.name == "system.low_battery"
+                and not self.config.context_low_battery_events
+            ):
+                continue
+            if change.name != "calendar.meeting":
+                self._plugins.events.emit(change.name, change.payload)
+        state = self._context.snapshot
+        should_pause = state.profile_pauses_animation
+        if should_pause != self._context_paused:
+            self._context_paused = should_pause
+            self.window.set_paused(self.config.paused or should_pause)
+            self.tray.refresh()
+        self._emit_plugin_event(
+            "system.context",
+            idle_seconds=state.idle_seconds,
+            fullscreen=state.fullscreen,
+            active_class=state.active_class,
+            active_title=state.active_title,
+            profile_id=state.profile_id,
+            network=state.network.value,
+            low_battery=state.low_battery,
+        )
+
     # --------------------------------------------------------------- settings
     def set_paused(self, paused: bool) -> None:
         self.config.paused = bool(paused)
-        self.window.set_paused(bool(paused))
+        self.window.set_paused(bool(paused) or self._context_paused)
         self.tray.refresh()
         self._schedule_save()
 
@@ -554,6 +651,85 @@ class Controller(QObject):
         self.config.do_not_disturb = bool(enabled)
         self.tray.refresh()
         self._schedule_save()
+
+    def set_context_setting(self, name: str, value: object) -> None:
+        if name not in {
+            "context_enabled",
+            "context_suppress_fullscreen",
+            "context_network_events",
+            "context_low_battery_events",
+            "low_battery_percent",
+            "media_controls_enabled",
+            "calendar_meeting_quiet",
+        }:
+            return
+        setattr(self.config, name, value)
+        self.config.normalize()
+        self._context = self._build_context_engine()
+        self._schedule_save()
+        QTimer.singleShot(0, self._check_context)
+
+    def add_application_profile(
+        self, name: str, class_contains: str, title_contains: str = ""
+    ) -> bool:
+        if not str(name).strip() or not (
+            str(class_contains).strip() or str(title_contains).strip()
+        ):
+            return False
+        existing = {
+            str(item.get("id", ""))
+            for item in self.config.application_profiles
+            if isinstance(item, dict)
+        }
+        index = len(existing) + 1
+        profile_id = f"profile-{index}"
+        while profile_id in existing:
+            index += 1
+            profile_id = f"profile-{index}"
+        self.config.application_profiles.append(
+            {
+                "id": profile_id,
+                "name": str(name).strip()[:80],
+                "class_contains": str(class_contains).strip()[:120],
+                "title_contains": str(title_contains).strip()[:120],
+                "suppress_notifications": True,
+                "pause_animation": False,
+                "enabled": True,
+            }
+        )
+        self.config.normalize()
+        self._context = self._build_context_engine()
+        self._schedule_save()
+        return True
+
+    def remove_application_profile(self, profile_id: str) -> bool:
+        before = len(self.config.application_profiles)
+        self.config.application_profiles = [
+            item
+            for item in self.config.application_profiles
+            if not isinstance(item, dict) or item.get("id") != profile_id
+        ]
+        if len(self.config.application_profiles) == before:
+            return False
+        self._context = self._build_context_engine()
+        self._schedule_save()
+        return True
+
+    def media_command(self, action: str) -> str:
+        if not self.config.media_controls_enabled:
+            return "media controls are disabled"
+        if not self.backend.supports(Capability.MEDIA_CONTROLS):
+            return self.backend.capability(Capability.MEDIA_CONTROLS).reason
+        if action == "status":
+            status = self.backend.media_status()
+            if not status.available:
+                return "no compatible media player is active"
+            return f"{status.playback}: {status.player}"
+        return (
+            f"media {action} sent"
+            if self.backend.media_control(action)
+            else "no compatible media player accepted the command"
+        )
 
     def set_playful(self, enabled: bool) -> None:
         self.config.playful = bool(enabled)
@@ -675,6 +851,10 @@ class Controller(QObject):
         now = datetime.now()
         occurrences = self._wellness.due(now)
         for occurrence in occurrences:
+            if not Controller._context_attention_allowed(
+                self, occurrence.reminder.urgent
+            ):
+                continue
             self._wellness.mark_triggered(occurrence)
             self._fire_reminder(occurrence.reminder)
         if self._wellness.dirty:
@@ -1209,8 +1389,24 @@ class Controller(QObject):
             now
         ):
             return False
-        if self.config.focus_suppress_fullscreen and self.backend.supports(
-            Capability.ACTIVE_WINDOW
+        if self.config.calendar_meeting_quiet and getattr(
+            self, "_meeting_active", False
+        ):
+            return False
+        context = getattr(self, "_context", None)
+        if (
+            self.config.context_enabled
+            and context is not None
+            and not context.attention_allowed(
+                suppress_fullscreen=self.config.focus_suppress_fullscreen,
+                suppress_meetings=self.config.calendar_meeting_quiet,
+            )
+        ):
+            return False
+        if (
+            not self.config.context_enabled
+            and self.config.focus_suppress_fullscreen
+            and self.backend.supports(Capability.ACTIVE_WINDOW)
         ):
             probe = self.backend.create_active_window_probe()
             try:
@@ -1220,6 +1416,23 @@ class Controller(QObject):
             finally:
                 probe.close()
         return True
+
+    def _context_attention_allowed(self, urgent: bool = False) -> bool:
+        if urgent:
+            return True
+        if self.config.calendar_meeting_quiet and getattr(
+            self, "_meeting_active", False
+        ):
+            return False
+        if not self.config.context_enabled:
+            return True
+        context = getattr(self, "_context", None)
+        if context is None:
+            return True
+        return context.attention_allowed(
+            suppress_fullscreen=self.config.context_suppress_fullscreen,
+            suppress_meetings=self.config.calendar_meeting_quiet,
+        )
 
     def focus_summary(self) -> str:
         state = self._focus.state
@@ -1469,6 +1682,8 @@ class Controller(QObject):
                 "stop": "focus stopped",
             }
             return replies[action] if handler() else "focus unchanged"
+        elif verb == "media" and len(parts) > 1:
+            return self.media_command(parts[1])
         elif verb == "click-through" and len(parts) > 1:
             self.set_click_through(parts[1] == "on")
         elif verb == "autostart" and len(parts) > 1:
@@ -1506,6 +1721,11 @@ class Controller(QObject):
             f"paused={self.window.is_paused}"
             f" focus={self._focus.state.status.value}:{self._focus.state.kind.value}"
             f" plugins={sum(record.status is PluginStatus.ACTIVE for record in self._plugins.records.values())}"
+            f" context={'on' if self.config.context_enabled else 'off'}"
+            f" fullscreen={'yes' if self._context.snapshot.fullscreen else 'no'}"
+            f" profile={self._context.snapshot.profile_id or '-'}"
+            f" network={self._context.snapshot.network.value}"
+            f" meeting={'yes' if self._meeting_active else 'no'}"
         )
 
     def _greet(self) -> None:
@@ -1627,6 +1847,10 @@ def build_parser() -> argparse.ArgumentParser:
     focus = sub.add_parser("focus", help="control the focus timer")
     focus.add_argument(
         "action", choices=("start", "pause", "resume", "skip", "stop", "status")
+    )
+    media = sub.add_parser("media", help="control an opt-in MPRIS media player")
+    media.add_argument(
+        "action", choices=("status", "play-pause", "next", "previous", "stop")
     )
     focus.add_argument(
         "kind",
@@ -1753,6 +1977,17 @@ def main(argv: list[str] | None = None) -> int:
             if reply:
                 print(reply)
                 return 0
+            print("Desktop Buddy is not running.", file=sys.stderr)
+            return 1
+        if args.command == "media":
+            reply = request_reply(f"media {args.action}")
+            if reply:
+                print(reply)
+                return (
+                    0
+                    if not reply.startswith(("media controls", "no compatible"))
+                    else 1
+                )
             print("Desktop Buddy is not running.", file=sys.stderr)
             return 1
         if args.command == "status":

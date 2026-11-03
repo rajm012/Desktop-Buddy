@@ -15,6 +15,7 @@ from typing import Any, Mapping
 from PyQt6.QtCore import QStandardPaths, QUrl
 
 from .. import APP_SLUG
+from ..context import MediaStatus, NetworkStatus
 
 try:
     from PyQt6.QtMultimedia import QSoundEffect
@@ -32,6 +33,11 @@ class Capability(str, Enum):
     CLICK_THROUGH = "click_through"
     AUDIO = "audio"
     SESSION_DIAGNOSTICS = "session_diagnostics"
+    IDLE_TIME = "idle_time"
+    FULLSCREEN = "fullscreen"
+    NETWORK = "network"
+    MEDIA_CONTROLS = "media_controls"
+    KEYCHAIN = "keychain"
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ class PlatformPaths:
 class BatteryStatus:
     on_battery: bool = False
     label: str = "unavailable"
+    percent: int | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +182,35 @@ class PlatformBackend(ABC):
     def create_active_window_probe(self) -> ActiveWindowProbe:
         return ActiveWindowProbe()
 
+    def idle_seconds(self) -> float | None:
+        return None
+
+    def fullscreen_active(self) -> bool:
+        probe = self.create_active_window_probe()
+        try:
+            info = probe.active_window() if probe.available else None
+            return bool(info and info.fullscreen)
+        finally:
+            probe.close()
+
+    def network_status(self) -> NetworkStatus:
+        return NetworkStatus()
+
+    def media_status(self) -> MediaStatus:
+        return MediaStatus()
+
+    def media_control(self, action: str) -> bool:
+        return False
+
+    def store_secret(self, key: str, value: str) -> bool:
+        return False
+
+    def read_secret(self, key: str) -> str | None:
+        return None
+
+    def delete_secret(self, key: str) -> bool:
+        return False
+
     def classify_window(self, class_name: str) -> str | None:
         return None
 
@@ -230,4 +266,9 @@ class GenericPlatformBackend(PlatformBackend):
             Capability.CLICK_THROUGH: CapabilityInfo(False, unavailable),
             Capability.AUDIO: CapabilityInfo(self.audio_available, unavailable),
             Capability.SESSION_DIAGNOSTICS: CapabilityInfo(True),
+            Capability.IDLE_TIME: CapabilityInfo(False, unavailable),
+            Capability.FULLSCREEN: CapabilityInfo(False, unavailable),
+            Capability.NETWORK: CapabilityInfo(False, unavailable),
+            Capability.MEDIA_CONTROLS: CapabilityInfo(False, unavailable),
+            Capability.KEYCHAIN: CapabilityInfo(False, unavailable),
         }

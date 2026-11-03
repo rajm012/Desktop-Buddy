@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from desktop_buddy.context import NetworkState
 from desktop_buddy.platforms.base import Capability
 from desktop_buddy.platforms.linux import LinuxBackend, classify_window
 
@@ -47,6 +48,18 @@ class LinuxBackendTests(unittest.TestCase):
             status = LinuxBackend(power_supply_root=power).battery_status()
             self.assertTrue(status.on_battery)
             self.assertEqual(status.label, "73% (Discharging)")
+            self.assertEqual(status.percent, 73)
+
+    def test_network_status_reads_linux_interfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            network = Path(tmp)
+            interface = network / "wlan0"
+            interface.mkdir()
+            (interface / "operstate").write_text("up\n", encoding="utf-8")
+            (interface / "carrier").write_text("1\n", encoding="utf-8")
+            status = LinuxBackend(network_root=network).network_status()
+            self.assertEqual(status.state, NetworkState.ONLINE)
+            self.assertEqual(status.interface, "wlan0")
 
     def test_wayland_exposes_unavailable_window_capabilities(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

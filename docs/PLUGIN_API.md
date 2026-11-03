@@ -34,6 +34,7 @@ are ignored, so an external plugin cannot replace a built-in.
   "description": "Adds a small action and observes startup.",
   "api_version": 1,
   "min_app_version": "1.6.0",
+  "data_access": ["Describe every category of user data read"],
   "permissions": ["actions", "events"],
   "required_capabilities": [],
   "entrypoint": "plugin.py:Plugin"
@@ -49,6 +50,8 @@ Required metadata fields are `id`, `name`, and `version`. Compatibility fields:
   written as `file.py:ClassName`.
 - `required_capabilities`: platform capability names such as `audio`,
   `active_window`, or `battery`. Activation is blocked when one is unavailable.
+- `data_access`: exact, user-facing descriptions of data the integration reads.
+  Preferences displays these declarations before enablement.
 
 ## Minimal plugin
 
@@ -87,6 +90,8 @@ Every used API must be declared in the manifest and granted by the user:
 | `tray` | `register_tray_item(id, label, callback)` | Adds an item under tray → Plugins. |
 | `settings` | `register_settings_page(id, title, factory)` | Adds a Preferences tab. |
 | `events` | `on(name, callback)`, `emit(name, **payload)` | Receives or publishes synchronous events. |
+| `calendar` | Marker permission for built-in/provider calendar readers | Grants declared read-only calendar access. |
+| `media` | Marker permission for built-in/provider media integrations | Grants declared native media access. |
 
 Contribution IDs are automatically prefixed with the plugin ID. Plugins cannot
 replace core or other-plugin contributions. Reminder definitions use the same
@@ -102,6 +107,9 @@ callbacks. The full application controller is not part of the plugin API.
 The stable API 1 event set is:
 
 - `app.started`, `app.stopping`
+- `system.context`, `system.fullscreen`, `system.active_application`
+- `system.low_battery`, `system.network`
+- `calendar.upcoming`, `calendar.meeting`
 - `system.capabilities`
 - `action.executed`
 - `reminder.triggered`, `reminder.done`, `reminder.snoozed`, `reminder.missed`

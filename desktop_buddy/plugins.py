@@ -26,6 +26,8 @@ class PluginPermission(str, Enum):
     TRAY = "tray"
     SETTINGS = "settings"
     EVENTS = "events"
+    CALENDAR = "calendar"
+    MEDIA = "media"
 
 
 class PluginStatus(str, Enum):
@@ -78,6 +80,7 @@ class PluginMetadata:
     max_app_version: str | None = None
     permissions: tuple[PluginPermission, ...] = ()
     required_capabilities: tuple[str, ...] = ()
+    data_access: tuple[str, ...] = ()
     builtin: bool = False
     entrypoint: str = "plugin.py:Plugin"
 
@@ -113,6 +116,14 @@ class PluginMetadata:
         capabilities = tuple(
             dict.fromkeys(str(value).strip() for value in raw_capabilities if value)
         )
+        raw_data_access = data.get("data_access", [])
+        if not isinstance(raw_data_access, (list, tuple)):
+            return None
+        data_access = tuple(
+            dict.fromkeys(
+                str(value).strip()[:200] for value in raw_data_access if value
+            )
+        )
         return cls(
             id=plugin_id,
             name=name,
@@ -127,6 +138,7 @@ class PluginMetadata:
             ),
             permissions=tuple(permissions),
             required_capabilities=capabilities,
+            data_access=data_access,
             builtin=builtin,
             entrypoint=str(data.get("entrypoint", "plugin.py:Plugin")).strip(),
         )

@@ -99,7 +99,7 @@ SPECIES: dict[str, dict[str, str]] = {
     "mochi": {"label": "Mochi", "default_name": "Mochi"},
 }
 DEFAULT_SPECIES = "robot"
-CURRENT_CONFIG_SCHEMA_VERSION = 5
+CURRENT_CONFIG_SCHEMA_VERSION = 6
 
 
 def default_reminders() -> list[dict[str, Any]]:
@@ -257,6 +257,19 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("plugins", {})
         version = 5
 
+    if version < 6:
+        migrated.setdefault("context_enabled", False)
+        migrated.setdefault("context_suppress_fullscreen", True)
+        migrated.setdefault("context_network_events", False)
+        migrated.setdefault("context_low_battery_events", False)
+        migrated.setdefault("low_battery_percent", 20)
+        migrated.setdefault("application_profiles", [])
+        migrated.setdefault("media_controls_enabled", False)
+        migrated.setdefault("calendar_sources", [])
+        migrated.setdefault("calendar_reminder_minutes", 10)
+        migrated.setdefault("calendar_meeting_quiet", True)
+        version = 6
+
     migrated["schema_version"] = max(version, CURRENT_CONFIG_SCHEMA_VERSION)
     return migrated
 
@@ -328,6 +341,16 @@ class Config:
     long_break_every: int = 4
     focus_respect_quiet_hours: bool = True
     focus_suppress_fullscreen: bool = True
+    context_enabled: bool = False
+    context_suppress_fullscreen: bool = True
+    context_network_events: bool = False
+    context_low_battery_events: bool = False
+    low_battery_percent: int = 20
+    application_profiles: list[dict[str, Any]] = field(default_factory=list)
+    media_controls_enabled: bool = False
+    calendar_sources: list[str] = field(default_factory=list)
+    calendar_reminder_minutes: int = 10
+    calendar_meeting_quiet: bool = True
     autostart: bool = False
     paused: bool = False
     position_x: float | None = None
@@ -414,6 +437,12 @@ class Config:
             "break_enabled",
             "focus_respect_quiet_hours",
             "focus_suppress_fullscreen",
+            "context_enabled",
+            "context_suppress_fullscreen",
+            "context_network_events",
+            "context_low_battery_events",
+            "media_controls_enabled",
+            "calendar_meeting_quiet",
             "autostart",
             "paused",
         ):
@@ -501,7 +530,15 @@ class Config:
                             str(value)
                             for value in raw_permissions
                             if str(value)
-                            in {"actions", "reminders", "tray", "settings", "events"}
+                            in {
+                                "actions",
+                                "reminders",
+                                "tray",
+                                "settings",
+                                "events",
+                                "calendar",
+                                "media",
+                            }
                         }
                     )
                     if isinstance(raw_permissions, (list, tuple))
@@ -512,6 +549,32 @@ class Config:
                     "permissions": permissions,
                 }
             self.plugins = normalized_plugins
+        from .context import profiles_from_config
+
+        self.application_profiles = [
+            profile.to_dict()
+            for profile in profiles_from_config(self.application_profiles)
+        ]
+        if not isinstance(self.calendar_sources, list):
+            self.calendar_sources = []
+        else:
+            self.calendar_sources = list(
+                dict.fromkeys(
+                    str(value).strip()[:1000]
+                    for value in self.calendar_sources
+                    if str(value).strip()
+                )
+            )[:20]
+        try:
+            self.low_battery_percent = int(_clamp(int(self.low_battery_percent), 5, 95))
+        except (TypeError, ValueError):
+            self.low_battery_percent = 20
+        try:
+            self.calendar_reminder_minutes = int(
+                _clamp(int(self.calendar_reminder_minutes), 0, 240)
+            )
+        except (TypeError, ValueError):
+            self.calendar_reminder_minutes = 10
         try:
             self.focus_minutes = int(_clamp(int(self.focus_minutes), 1, 180))
         except (TypeError, ValueError):
