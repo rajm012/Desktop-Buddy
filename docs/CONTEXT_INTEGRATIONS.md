@@ -36,8 +36,8 @@ system event payloads, so it should be granted only to trusted plugins.
 - Secrets use the desktop Secret Service through `secret-tool`.
 
 Wayland and the generic backend report unsupported native capabilities rather
-than attempting unreliable fallbacks. Later Windows and macOS phases implement
-the same backend methods with their native APIs.
+than attempting unreliable fallbacks. Windows implements the same context and
+keychain methods with Win32 APIs; macOS remains future backend work.
 
 ## Application profiles
 

@@ -525,6 +525,8 @@ class Controller(QObject):
 
     def _check_context(self) -> None:
         if not self.config.context_enabled:
+            if self.backend.adapt_exclusive_fullscreen:
+                self.window.set_platform_fullscreen(self.backend.fullscreen_active())
             self._emit_plugin_event(
                 "system.context", timestamp=datetime.now().isoformat()
             )
@@ -579,6 +581,7 @@ class Controller(QObject):
             if change.name != "calendar.meeting":
                 self._plugins.events.emit(change.name, change.payload)
         state = self._context.snapshot
+        self.window.set_platform_fullscreen(state.fullscreen)
         should_pause = state.profile_pauses_animation
         if should_pause != self._context_paused:
             self._context_paused = should_pause
@@ -1743,6 +1746,7 @@ def diagnose() -> int:
 
     print("Desktop Buddy diagnostics", flush=True)
     backend = get_backend()
+    backend.prepare_process()
     line("version", __version__)
     line("python", f"{sys.version.split()[0]} ({sys.executable})")
     try:
@@ -1873,6 +1877,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     backend = get_backend()
+    backend.prepare_process()
 
     if args.diagnose:
         return diagnose()

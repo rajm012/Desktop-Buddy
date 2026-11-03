@@ -9,7 +9,9 @@ investigates your cursor, and **looks after you** with customizable local
 reminders, safe quick actions, and a fully local focus timer.
 **Boo-ombastic** the ghost and **Mochi** the original blob-cat remain available.
 
-Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
+Linux/X11 is the verified release platform. A native Windows build is available
+as a release preview pending signed-installer and Windows 10/11 mixed-DPI
+validation. See [the Windows guide](docs/WINDOWS.md) and [Wayland](#wayland).
 
 ![Bolt's baseline animation poses](docs/screenshots/bolt-poses.png)
 
@@ -61,10 +63,14 @@ Works best on **X11 / "Ubuntu on Xorg"**. See [Wayland](#wayland) below.
 - Remembers its position and settings between sessions
 - Single instance: launching again just shows the existing buddy
 - Platform-backed autostart entry so it comes back when you log in
+- Native Windows backend for active windows, fullscreen, click-through, power,
+  idle state, Credential Manager and Startup-folder autostart
 - All artwork drawn procedurally with `QPainter` — crisp at any scale (including
   your 2.5× fractional HiDPI setup), no bitmap assets to ship
 
 ## Install
+
+### Linux
 
 Everything is user-level; **no sudo needed**.
 
@@ -85,6 +91,14 @@ The installer:
 > If the `desktop-buddy` command is not found right away, your shell's `PATH`
 > predates the new `~/.local/bin` directory. Use `~/.local/bin/desktop-buddy`
 > or log out/in once (Ubuntu adds it automatically at login).
+
+### Windows preview
+
+Windows users install the standalone Inno Setup package produced by the Windows
+release workflow; Python is not required on the target computer. Public support
+is gated on a signed installer and the physical Windows 10/11 test matrix. See
+[docs/WINDOWS.md](docs/WINDOWS.md) for builds, signing, uninstall choices, and
+validation requirements.
 
 ## Usage
 
@@ -299,6 +313,7 @@ desktop_buddy/
   platforms/        capability interface and Linux/X11 implementation
     base.py          backend contract, portable paths/audio/IPC identity
     linux.py         X11 probing, workspace behavior, battery and autostart
+    windows.py       Win32 windows, DPI, power, idle, keychain and autostart
   wellness.py       general reminder schedules, parsing and history (pure)
   focus.py          focus/break state machine, persistence and history (pure)
   actions.py        validated, permission-aware quick action registry (pure)
@@ -333,6 +348,17 @@ The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
 ## Changelog
+
+**1.8.0 — Windows preview**
+- Added the native Win32 backend for foreground-window geometry, fullscreen,
+  topmost/click-through behavior, battery, idle time, network state and Windows
+  Credential Manager.
+- Added PerMonitorV2 process/installer manifests, Startup-folder autostart,
+  exclusive-fullscreen lowering, and negative-origin multi-monitor coverage.
+- Added PyInstaller/Inno Setup packaging, explicit preserve-or-purge uninstall,
+  optional timestamped code signing, and Windows CI artifacts.
+- Public Windows support remains gated on a production-signed installer and the
+  documented Windows 10/11 physical/VM DPI validation matrix.
 
 **1.7.0**
 - Added opt-in, 15-second context polling with Linux/X11 idle and fullscreen

@@ -220,15 +220,20 @@ Goal: ship a supported Windows desktop version.
 
 ### Steps
 
-1. Implement the Windows backend using Win32 APIs for active windows, geometry,
+1. [x] Implement the Windows backend using Win32 APIs for active windows, geometry,
    always-on-top, click-through and battery state.
-2. Implement Windows autostart using the Startup folder or an approved startup task.
-3. Validate transparent-window rendering at common DPI scaling levels.
-4. Test tray behaviour, single-instance IPC and multi-monitor placement.
-5. Disable or adapt features that behave differently under exclusive fullscreen.
-6. Create a signed installer and uninstall flow.
-7. Add Windows CI for tests and packaged builds.
-8. Test Windows 10 and Windows 11 on physical or virtual machines.
+2. [x] Implement Windows autostart using the Startup folder or an approved startup task.
+3. [ ] Validate transparent-window rendering at common DPI scaling levels.
+4. [x] Test tray behaviour, single-instance IPC and multi-monitor placement.
+5. [x] Disable or adapt features that behave differently under exclusive fullscreen.
+6. [ ] Create a signed installer and uninstall flow.
+   - Installer and explicit preserve/purge uninstall flow are implemented.
+   - Release signing still requires the production certificate and timestamped build.
+7. [x] Add Windows CI for tests and packaged builds.
+8. [ ] Test Windows 10 and Windows 11 on physical or virtual machines.
+
+Steps 3, 6, and 8 are release gates that require Windows machines and signing
+credentials. See `docs/WINDOWS.md` for the validation matrix and commands.
 
 ### Acceptance criteria
 

@@ -32,7 +32,9 @@ QT_QPA_PLATFORM=offscreen python tools/preview.py \
 
 - X11 is the only fully supported display system. Wayland compositors can block
   positioning, always-on-top, sticky-workspace and click-through behaviour.
-- Windows and macOS are not supported yet.
+- Windows has a native backend and packaging preview, but public support remains
+  gated on signed installers and Windows 10/11 mixed-DPI validation. macOS is not
+  supported yet.
 - Perching is heuristic and limited to recognizable X11 browser and terminal
   windows; unusual window managers or application class names may not match.
 - Click-through and workspace stickiness depend on best-effort X11 calls.

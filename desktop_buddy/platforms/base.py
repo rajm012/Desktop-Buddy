@@ -163,6 +163,14 @@ class PlatformBackend(ABC):
     def server_name(self) -> str:
         return f"{APP_SLUG}-{self.user_session_id()}"
 
+    def prepare_process(self) -> None:
+        """Apply native process settings before QApplication is constructed."""
+        return None
+
+    @property
+    def adapt_exclusive_fullscreen(self) -> bool:
+        return False
+
     def icon_path(self) -> Path:
         return Path(__file__).resolve().parent.parent / "assets" / "icon.svg"
 
@@ -215,6 +223,13 @@ class PlatformBackend(ABC):
         return None
 
     def apply_workspace_behavior(self, native_window_id: int) -> bool:
+        return False
+
+    def apply_window_behavior(
+        self, native_window_id: int, *, always_on_top: bool, click_through: bool
+    ) -> bool:
+        if self.supports(Capability.WORKSPACE_BEHAVIOR):
+            return self.apply_workspace_behavior(native_window_id)
         return False
 
     @property

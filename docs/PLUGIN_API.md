@@ -59,9 +59,7 @@ Required metadata fields are `id`, `name`, and `version`. Compatibility fields:
 class Plugin:
     def activate(self, context):
         self.context = context
-        self.action_id = context.register_action(
-            "hello", "Say hello", self.say_hello
-        )
+        self.action_id = context.register_action("hello", "Say hello", self.say_hello)
         context.on("app.started", self.on_started)
 
     def deactivate(self):

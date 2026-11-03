@@ -94,6 +94,7 @@ class BuddyWindow(QWidget):
         self._focus_status = FocusStatus.STOPPED
         self._focus_remaining = 0
         self._focus_completion_left = 0.0
+        self._platform_fullscreen = False
 
         screen = QGuiApplication.primaryScreen()
         self._screen: QScreen | None = screen
@@ -357,6 +358,7 @@ class BuddyWindow(QWidget):
             self._click_through_active(),
         )
         if flags == self._flags:
+            self._make_sticky()
             return
         visible = self.isVisible()
         self._flags = flags
@@ -366,13 +368,24 @@ class BuddyWindow(QWidget):
             self._make_sticky()
 
     def _make_sticky(self) -> None:
-        """Keep the buddy visible on every workspace when supported."""
-        if not self.backend.supports(Capability.WORKSPACE_BEHAVIOR):
-            return
+        """Apply native topmost, input and workspace behavior when supported."""
         try:
-            self.backend.apply_workspace_behavior(int(self.winId()))
+            self.backend.apply_window_behavior(
+                int(self.winId()),
+                always_on_top=self.config.always_on_top
+                and not self._platform_fullscreen,
+                click_through=self._click_through_active(),
+            )
         except Exception:  # noqa: BLE001
-            log.debug("Could not set sticky window state", exc_info=True)
+            log.debug("Could not apply native window behavior", exc_info=True)
+
+    def set_platform_fullscreen(self, active: bool) -> None:
+        """Lower native topmost state while another app owns fullscreen."""
+        active = bool(active)
+        if active == self._platform_fullscreen:
+            return
+        self._platform_fullscreen = active
+        self._make_sticky()
 
     def _move_window(self) -> None:
         """Keep the window on-screen and move the buddy inside it instead.
@@ -514,7 +527,8 @@ class BuddyWindow(QWidget):
             self._drop_perch()
             return
         info = self._probe.active_window()
-        if info is None or info.hidden:
+        self.set_platform_fullscreen(bool(info and info.fullscreen))
+        if info is None or info.hidden or info.fullscreen:
             self._drop_perch()
             return
         try:

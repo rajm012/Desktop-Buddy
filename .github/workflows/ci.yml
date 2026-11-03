@@ -21,3 +21,39 @@ jobs:
         run: python -m pip install -e '.[dev]'
       - name: Formatting, tests and package build
         run: ./scripts/check.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project, development, and packaging tools
+        run: python -m pip install -e ".[dev,windows]"
+      - name: Formatting and lint
+        run: |
+          python -m ruff format --check .
+          python -m ruff check .
+      - name: Tests
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -m unittest discover -s tests -v
+      - name: Build standalone application
+        run: python -m PyInstaller --noconfirm --clean desktop-buddy-windows.spec
+      - name: Smoke packaged executable
+        shell: pwsh
+        run: |
+          $process = Start-Process "dist\DesktopBuddy\DesktopBuddy.exe" -ArgumentList "--version" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+      - name: Build unsigned installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "packaging\windows\DesktopBuddy.iss"'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-buddy-windows-unsigned
+          path: |
+            dist/DesktopBuddy/**
+            dist/installer/*.exe

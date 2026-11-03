@@ -6,9 +6,9 @@ This file is the operational handbook for coding agents working in this reposito
 
 Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local custom reminders, safe quick actions, a focus timer, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
 
-Current package version: `1.7.0`.
+Current package version: `1.8.0` (Windows preview).
 
-Primary supported environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows and macOS currently use the generic backend and are roadmap work, not supported native implementations.
+Primary verified release environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows now has a native backend and standalone packaging preview, but public support remains gated on signed artifacts and the Windows 10/11 mixed-DPI validation matrix. macOS still uses the generic backend.
 
 Guiding product rules:
 
@@ -22,12 +22,12 @@ Guiding product rules:
 ## 2. Current development status
 
 Last verified: 2026-11-03 on branch `main` at commit `87de701` plus the
-uncommitted Phase 6 implementation described below.
+uncommitted Phase 6 and Phase 7 preview implementation described below.
 
 Repository state at handoff:
 
 - `main` is synchronized with `origin/main`.
-- The working tree contains the uncommitted Phase 6 implementation and its
+- The working tree contains the uncommitted Phase 6 and Phase 7 preview and their
   documentation/tests; preserve it unless the user explicitly asks to commit or
   discard it.
 - Phase 0 is complete: stable baseline, migrations, CI, renderer/CLI/IPC tests, screenshots, and performance measurements.
@@ -37,7 +37,9 @@ Repository state at handoff:
 - Phase 4 is complete: general reminders, local schedule parsing, outcome history, safe quick actions, explicit command approval, Preferences/tray integration, and CLI/IPC controls.
 - Phase 5 is complete: plugin API 1, event bus, limited contribution APIs, built-in/external discovery, permissions, failure isolation, and management UI/CLI.
 - Phase 6 is complete: opt-in context polling, app profiles, fullscreen/idle/battery/network events, native media controls, keychain hooks, and a read-only local calendar plugin.
-- Phases 7 through 11 have not started.
+- Phase 7 engineering is implemented: Win32 backend, autostart, DPI manifest, fullscreen adaptation, packaging, uninstall choice, Windows CI, and automated geometry/service tests.
+- Phase 7 release gates remain: production signing, real DPI/rendering validation, and Windows 10/11 physical/VM testing.
+- Phases 8 through 11 have not started.
 
 History is now represented by the Phase 3, Phase 4, and Phase 5 commits ending at
 `87de701`; use the current code and tests rather than the older ambiguous commit
@@ -47,10 +49,10 @@ Verification at handoff:
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
-- Unit/smoke tests: 144 passing.
+- Unit/smoke tests: 154 passing.
 - Source distribution and wheel build: passing.
 
-The next roadmap task is Phase 7, Step 1: implement the native Windows backend. Preserve the Phase 6 capability contract and keep unavailable features explicit while the backend is incomplete.
+The next roadmap work is Phase 7 Steps 3, 6, and 8: run the signed Windows installer through the physical/VM DPI and lifecycle matrix in `docs/WINDOWS.md`. Do not mark Windows fully supported from Linux-hosted tests alone.
 
 ## 3. Repository map
 
@@ -95,6 +97,7 @@ The next roadmap task is Phase 7, Step 1: implement the native Windows backend. 
 | `desktop_buddy/platform_utils.py` | Compatibility wrappers around the backend API. |
 | `desktop_buddy/platforms/base.py` | Backend contract, capabilities, portable paths, generic backend, Qt audio. |
 | `desktop_buddy/platforms/linux.py` | Linux/X11 window inspection, workspace behavior, battery, and autostart. |
+| `desktop_buddy/platforms/windows.py` | Win32 window/fullscreen probing, DPI setup, native styles, battery, idle, network, Credential Manager, and Startup autostart. |
 | `desktop_buddy/platforms/__init__.py` | Process-wide backend selection and test override. |
 
 ### Tests
@@ -188,6 +191,9 @@ When adding a platform-dependent feature:
 7. Keep `ctypes`, X11 libraries, Linux filesystem probing, and Linux-specific command/path assumptions out of non-platform modules.
 
 Do not assume X11 merely because the OS is Linux. Wayland limitations are an expected supported condition.
+
+On Windows, call `backend.prepare_process()` before constructing QApplication so
+PerMonitorV2 DPI awareness is established before Qt creates native windows.
 
 ## 7. UI and controller conventions
 
@@ -480,9 +486,59 @@ All eight Phase 6 steps and acceptance criteria are checked in `ROADMAP.md`. The
 next handoff is Phase 7: a native Windows backend using the expanded capability
 contract.
 
-## 14. Known constraints and common pitfalls
+## 14. Phase 7 implementation reference
+
+Phase 7 code is implemented as the `1.8.0` Windows preview. Release validation is
+deliberately incomplete until signed artifacts run on Windows 10 and Windows 11.
+
+### Native backend
+
+- Backend selection uses `WindowsBackend` on `sys.platform == "win32"`.
+- `NativeWindowsApi` wraps Win32 through `ctypes`; native imports stay isolated in
+  `platforms/windows.py`.
+- Foreground windows include class/title, physical rectangle, minimized/hidden
+  state, and monitor-relative fullscreen detection that handles negative monitor
+  origins.
+- Topmost/click-through use extended styles and `SetWindowPos` without activation.
+  Windows lowers native topmost while another application is fullscreen and
+  disables perching on fullscreen windows.
+- Battery uses `GetSystemPowerStatus`, idle time uses `GetLastInputInfo`, network
+  state uses `InternetGetConnectedState`, and secrets use Credential Manager.
+- Windows virtual-desktop pinning and native media transport controls remain
+  explicit unavailable capabilities.
+
+### DPI, packaging and lifecycle
+
+- `backend.prepare_process()` requests PerMonitorV2 awareness before QApplication.
+- `packaging/windows/app.manifest` declares PerMonitorV2, asInvoker, Windows
+  compatibility, and long-path support.
+- `desktop-buddy-windows.spec` creates a windowed one-directory PyInstaller build
+  containing Python, PyQt6, Qt plugins, assets, and application modules.
+- `packaging/windows/DesktopBuddy.iss` creates a per-user Inno Setup installer.
+  Uninstall explicitly asks whether local config/history/log/plugin/cache data
+  should be preserved or purged.
+- `scripts/build_windows.ps1` optionally signs both executable and installer with
+  SHA-256 and a trusted timestamp using protected environment credentials.
+
+### CI and validation
+
+- `.github/workflows/ci.yml` has a `windows-latest` job for Ruff, all tests,
+  PyInstaller, packaged-executable smoke, Inno Setup, and unsigned artifacts.
+- `tests/test_windows_backend.py` covers capabilities, active-window delegation,
+  autostart, native styles, credentials, classification, secondary-monitor
+  fullscreen geometry, and backend selection.
+- `tests/test_windows_packaging.py` locks the DPI manifest, windowed PyInstaller
+  build, installer version/data choice, and Windows CI artifact configuration.
+- Linux-hosted tests cannot validate actual transparent rendering, tray shell
+  integration, notifications, SmartScreen, mixed-DPI moves, or code signatures.
+- `docs/WINDOWS.md` is the authoritative release matrix. Roadmap Steps 3, 6, and
+  8 remain unchecked until that matrix passes with a production-signed build.
+
+## 15. Known constraints and common pitfalls
 
 - Linux/X11 is the only full desktop backend today.
+- Windows is a native preview, not a completed supported release until its signed
+  installer and Windows 10/11 validation gates pass.
 - Wayland cannot reliably support arbitrary positioning, click-through, global window inspection, or forced always-on-top using standard Qt alone.
 - A tray icon may be unavailable on desktops without AppIndicator support; the buddy context menu must remain usable.
 - Qt audio can be unavailable in test/headless environments and must degrade safely.
@@ -497,7 +553,7 @@ contract.
 - Do not describe plugin permissions as a Python/OS sandbox; external plugins execute with the user's account.
 - Do not import external plugin modules during discovery or allow entrypoints outside their plugin directory.
 
-## 15. Agent workflow
+## 16. Agent workflow
 
 For every task:
 

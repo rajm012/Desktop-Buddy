@@ -17,6 +17,10 @@ def get_backend() -> PlatformBackend:
             from .linux import LinuxBackend
 
             _BACKEND = LinuxBackend()
+        elif sys.platform == "win32":
+            from .windows import WindowsBackend
+
+            _BACKEND = WindowsBackend()
         else:
             _BACKEND = GenericPlatformBackend()
     return _BACKEND
