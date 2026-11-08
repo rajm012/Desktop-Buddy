@@ -67,29 +67,14 @@ class WindowsPackagingTests(unittest.TestCase):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         self.assertIn("recursive-include scripts *.ps1", manifest)
 
-    def test_windows_ci_builds_and_uploads_standalone_artifacts(self) -> None:
+    def test_hosted_checks_are_manual_and_linux_only(self) -> None:
         text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn("windows-latest", text)
-        self.assertIn("desktop-buddy-windows.spec", text)
-        self.assertIn("Inno Setup 6", text)
-        self.assertIn("desktop-buddy-windows-unsigned", text)
-
-    def test_signed_release_workflow_protects_and_verifies_credentials(self) -> None:
-        text = (ROOT / ".github/workflows/windows-release.yml").read_text(
-            encoding="utf-8"
-        )
         self.assertIn("workflow_dispatch", text)
-        self.assertIn("environment: windows-release", text)
-        self.assertIn("secrets.WINDOWS_SIGNING_CERT_BASE64", text)
-        self.assertIn("secrets.WINDOWS_SIGNING_PASSWORD", text)
-        self.assertIn("-Installer -Sign", text)
-        self.assertIn("Get-AuthenticodeSignature", text)
-        self.assertIn("signtool", text.lower())
-        self.assertIn("validate_windows_release.ps1", text)
-        self.assertIn("windows-ci-preflight.md", text)
-        self.assertIn("if: always()", text)
-        self.assertIn("Remove-Item -LiteralPath", text)
-        self.assertIn("desktop-buddy-windows-signed", text)
+        self.assertIn("ubuntu-latest", text)
+        self.assertNotIn("windows-latest", text)
+        self.assertNotIn("  push:", text)
+        self.assertNotIn("  pull_request:", text)
+        self.assertFalse((ROOT / ".github/workflows/windows-release.yml").exists())
 
 
 if __name__ == "__main__":

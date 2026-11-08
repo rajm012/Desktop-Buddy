@@ -12,6 +12,19 @@ should leave the application usable, tested, and releasable.
 - Deliver desktop support before building a separate mobile application.
 - Add one reliable integration at a time instead of building many incomplete ones.
 
+## Current release direction (2026-11-08)
+
+- Version `1.8.0` ships for Linux x86_64, built and published from the local
+  machine using `scripts/build_linux.sh` and `scripts/release_linux.sh`.
+- Phases 0–6 are complete. Phase 7 engineering is retained, but Windows builds
+  and releases are deferred; signing and real-machine validation remain open.
+- Automatic hosted CI is paused to conserve GitHub Actions minutes. Linux
+  checks can be dispatched manually; local release builds run all checks.
+- Linux packaging from Phase 10 now includes a standalone archive, Python
+  distributions, recorded build provenance and checksums. Multi-platform
+  packages, update checking, signatures and the remaining Phase 10 gates are
+  still future work.
+
 ## Target architecture
 
 ```text
@@ -55,7 +68,7 @@ Goal: make later changes measurable and safe.
 
 - [x] Tests run with one documented command.
 - [x] Configuration upgrades do not depend on character names.
-- [x] CI builds and tests every commit.
+- [ ] CI builds and tests every commit (previously enabled; now manual to conserve Actions minutes).
 - [x] Performance measurements are recorded in the README or a benchmark document.
 
 ---
@@ -228,9 +241,9 @@ Goal: ship a supported Windows desktop version.
 5. [x] Disable or adapt features that behave differently under exclusive fullscreen.
 6. [ ] Create a signed installer and uninstall flow.
    - Installer and explicit preserve/purge uninstall flow are implemented.
-   - A protected release workflow builds, timestamp-signs, verifies, and uploads signed artifacts while removing temporary certificate material.
-   - The gate remains open until that workflow runs with the production certificate and the resulting artifact passes the release matrix.
-7. [x] Add Windows CI for tests and packaged builds.
+   - Local signing and verification tooling is retained; the hosted Windows release workflow is removed while Windows is deferred.
+   - The gate remains open until a production-signed artifact passes the release matrix.
+7. [ ] Add Windows CI for tests and packaged builds (previously implemented; disabled while Windows is deferred).
 8. [ ] Test Windows 10 and Windows 11 on physical or virtual machines.
 
 Steps 3, 6, and 8 are release gates that require Windows machines and signing
@@ -298,11 +311,17 @@ Goal: make releases safe for non-technical users.
 ### Steps
 
 1. Build packages on Linux, Windows and macOS in CI.
+   - Linux standalone and Python packages are built locally with pinned
+     dependencies and source-commit verification; hosted builds are deferred.
 2. Add semantic versioning and generated release notes.
+   - Versioned Linux tags and reviewed release notes are implemented; automatic
+     note generation remains future work.
 3. Add an opt-in update checker with signed release metadata.
 4. Add crash recovery and a user-visible diagnostics/log viewer.
 5. Test clean installation, upgrade and uninstall paths.
 6. Publish checksums and signatures for every release.
+   - SHA-256 checksums are published for the Linux assets; signatures remain
+     future work.
 7. Create a platform support and minimum-version policy.
 
 ### Acceptance criteria

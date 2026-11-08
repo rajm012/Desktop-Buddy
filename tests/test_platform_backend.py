@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from desktop_buddy.context import NetworkState
 from desktop_buddy.platforms.base import Capability
@@ -37,6 +38,20 @@ class LinuxBackendTests(unittest.TestCase):
             self.assertIn("[Desktop Entry]", path.read_text(encoding="utf-8"))
             backend.set_autostart(False, base)
             self.assertFalse(backend.autostart_enabled(base))
+
+    def test_frozen_autostart_launches_binary_without_python_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            backend = LinuxBackend(config_root=base)
+            executable = '/opt/Desktop Buddy/50%/buddy"$`'
+            with (
+                patch("sys.frozen", True, create=True),
+                patch("sys.executable", executable),
+            ):
+                path = backend.set_autostart(True, base)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn('Exec="/opt/Desktop Buddy/50%%/buddy\\"\\$\\`"\n', text)
+            self.assertNotIn("-m desktop_buddy", text)
 
     def test_battery_status_reads_linux_power_supply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -9,9 +9,10 @@ investigates your cursor, and **looks after you** with customizable local
 reminders, safe quick actions, and a fully local focus timer.
 **Boo-ombastic** the ghost and **Mochi** the original blob-cat remain available.
 
-Linux/X11 is the verified release platform. A native Windows build is available
-as a release preview pending signed-installer and Windows 10/11 mixed-DPI
-validation. See [the Windows guide](docs/WINDOWS.md) and [Wayland](#wayland).
+Linux/X11 is the verified release platform. Download the current Linux build
+from [GitHub Releases](https://github.com/rajm012/Desktop-Buddy/releases/latest).
+Windows releases are deferred; the native backend remains in the source for
+future validation. See [Wayland](#wayland) for session limitations.
 
 ![Bolt's baseline animation poses](docs/screenshots/bolt-poses.png)
 
@@ -63,8 +64,6 @@ validation. See [the Windows guide](docs/WINDOWS.md) and [Wayland](#wayland).
 - Remembers its position and settings between sessions
 - Single instance: launching again just shows the existing buddy
 - Platform-backed autostart entry so it comes back when you log in
-- Native Windows backend for active windows, fullscreen, click-through, power,
-  idle state, Credential Manager and Startup-folder autostart
 - All artwork drawn procedurally with `QPainter` — crisp at any scale (including
   your 2.5× fractional HiDPI setup), no bitmap assets to ship
 
@@ -72,16 +71,36 @@ validation. See [the Windows guide](docs/WINDOWS.md) and [Wayland](#wayland).
 
 ### Linux
 
+Download `desktop-buddy-1.8.0-linux-x86_64.tar.gz` from
+[the release](https://github.com/rajm012/Desktop-Buddy/releases/tag/v1.8.0).
+The standalone archive includes Python and Qt and runs on Ubuntu 24.04 or newer
+(Linux x86_64, glibc 2.39+). Extract it and launch `desktop-buddy`, or install it
+for your user:
+
+```bash
+tar -xzf desktop-buddy-1.8.0-linux-x86_64.tar.gz
+cd desktop-buddy
+./install.sh                 # --no-autostart skips login startup
+```
+
+This copies the bundle to `~/.local/share/desktop-buddy/app`, adds a launcher and
+application-menu entry, and enables login startup. No Python installation or
+downloads are needed. Settings and history survive upgrades. See the archive's
+README for system-library requirements, or [the Linux release guide](docs/RELEASING.md).
+
+### Linux from source
+
 Everything is user-level; **no sudo needed**.
 
 ```bash
+git clone https://github.com/rajm012/Desktop-Buddy.git ~/desktop-buddy
 cd ~/desktop-buddy
 ./install.sh                 # add --no-autostart to skip login startup
 ```
 
 The installer:
 
-1. creates a Python 3.12 virtual environment in `.venv/` and installs PyQt6;
+1. creates a Python 3.10+ virtual environment in `.venv/` and installs PyQt6;
 2. vendors `libxcb-cursor` into `vendor/syslibs/` if your system lacks it
    (Qt ≥ 6.5 needs it for the X11 platform plugin — this machine was missing it);
 3. installs the launcher `~/.local/bin/desktop-buddy`;
@@ -92,13 +111,11 @@ The installer:
 > predates the new `~/.local/bin` directory. Use `~/.local/bin/desktop-buddy`
 > or log out/in once (Ubuntu adds it automatically at login).
 
-### Windows preview
+### Windows (deferred)
 
-Windows users install the standalone Inno Setup package produced by the Windows
-release workflow; Python is not required on the target computer. Public support
-is gated on a signed installer and the physical Windows 10/11 test matrix. See
-[docs/WINDOWS.md](docs/WINDOWS.md) for builds, signing, uninstall choices, and
-validation requirements.
+No Windows artifact is published in this release. Windows packaging scripts are
+retained for future work; signing and the physical Windows 10/11 validation
+matrix remain incomplete. See [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Usage
 
@@ -336,7 +353,8 @@ tools/preview.py    renders a pose/theme sheet to PNG
 ## Development
 
 ```bash
-.venv/bin/pip install -e '.[dev]'       # one-time development setup
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'         # one-time development setup
 ./scripts/check.sh                      # format check, tests, package build
 .venv/bin/python tools/preview.py /tmp/buddy-preview.png
 ./run.sh --diagnose
@@ -347,16 +365,35 @@ The behaviour, wellness, focus, action, and plugin engines have no Qt dependency
 The supported Phase 0 feature set and known constraints are maintained in
 [docs/BASELINE.md](docs/BASELINE.md).
 
+## Local Linux releases
+
+```bash
+./scripts/build_linux.sh                # check and build locally
+./scripts/release_linux.sh --publish-only  # upload that exact build with gh
+```
+
+Or run `./scripts/release_linux.sh` to build and publish in one command. Commit
+changes before building; the publisher verifies the source commit and checksums
+and refuses stale or uncommitted builds. Output is in `dist/releases/v1.8.0/`.
+No GitHub Actions workflow is run. Hosted checks are Linux-only and manual to
+avoid spending Actions minutes on pushes or pull requests. See
+[docs/RELEASING.md](docs/RELEASING.md) for future version bumps and prerequisites.
+
 ## Changelog
 
-**1.8.0 — Windows preview**
+**1.8.0 — Linux release**
+- Published a locally built Linux x86_64 standalone archive, wheel, source
+  distribution, build provenance and SHA-256 checksums.
+- Added local build/publish commands and manual Linux-only hosted checks.
+- Fixed standalone Linux autostart to launch the packaged executable correctly,
+  including paths containing spaces or desktop-entry special characters.
 - Added the native Win32 backend for foreground-window geometry, fullscreen,
   topmost/click-through behavior, battery, idle time, network state and Windows
   Credential Manager.
 - Added PerMonitorV2 process/installer manifests, Startup-folder autostart,
   exclusive-fullscreen lowering, and negative-origin multi-monitor coverage.
 - Added PyInstaller/Inno Setup packaging, explicit preserve-or-purge uninstall,
-  optional timestamped code signing, and Windows CI artifacts.
+  optional timestamped code signing; Windows builds and releases are deferred.
 - Public Windows support remains gated on a production-signed installer and the
   documented Windows 10/11 physical/VM DPI validation matrix.
 

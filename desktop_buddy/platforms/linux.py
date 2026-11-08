@@ -459,14 +459,22 @@ class LinuxBackend(PlatformBackend):
         return Path.home() / ".local" / "bin" / APP_SLUG
 
     def launcher_command(self) -> str:
+        if getattr(sys, "frozen", False):
+            return self._desktop_exec_arg(sys.executable)
         launcher = self.launcher_path()
         if launcher.is_file() and os.access(launcher, os.X_OK):
-            return str(launcher)
+            return self._desktop_exec_arg(str(launcher))
         app_dir = Path(__file__).resolve().parent.parent.parent
         venv_python = app_dir / ".venv" / "bin" / "python"
         if venv_python.is_file():
-            return f"{venv_python} -m desktop_buddy"
-        return f"{sys.executable} -m desktop_buddy"
+            return f"{self._desktop_exec_arg(str(venv_python))} -m desktop_buddy"
+        return f"{self._desktop_exec_arg(sys.executable)} -m desktop_buddy"
+
+    @staticmethod
+    def _desktop_exec_arg(value: str) -> str:
+        for char in ("\\", '"', "`", "$"):
+            value = value.replace(char, "\\" + char)
+        return '"' + value.replace("%", "%%") + '"'
 
     def launcher_description(self) -> str:
         found = shutil.which(APP_SLUG)

@@ -1,5 +1,9 @@
 # Windows build and release guide
 
+Windows builds and releases are deferred. The public v1.8.0 release is
+Linux-only and built locally; see [RELEASING.md](RELEASING.md). The instructions
+below are retained for future Windows development and validation.
+
 The native Windows backend and packaging pipeline are implemented, but a public
 Windows release is not complete until the signed installer passes the physical
 Windows 10/11 validation matrix below.
@@ -67,21 +71,9 @@ signs the final installer, using SHA-256 and a trusted timestamp. Release
 automation must inject the certificate/password as protected secrets and delete
 temporary certificate material after signing.
 
-For protected CI signing, configure a GitHub environment named
-`windows-release` with required reviewers and these environment secrets:
-
-- `WINDOWS_SIGNING_CERT_BASE64`: base64-encoded contents of the production PFX;
-- `WINDOWS_SIGNING_PASSWORD`: the PFX password.
-
-Then manually run the **Windows signed release** workflow. It decodes the PFX
-only into the hosted runner's temporary directory, builds and signs the
-standalone executable and installer, verifies both Authenticode signatures with
-PowerShell and `signtool`, uploads the `desktop-buddy-windows-signed` artifact,
-includes a CI-machine preflight report, and removes the temporary PFX even if an
-earlier step fails. Download the artifact into the controlled release environment
-before its 30-day retention period expires. The workflow does not publish a
-GitHub release automatically. Its preflight report proves the validation script
-ran successfully, but does not replace the Windows 10/11 manual reports.
+The hosted Windows signing workflow has been removed and CI no longer builds
+Windows artifacts. If Windows work resumes, use the local signing command above
+and complete the Windows 10/11 validation reports before publishing.
 
 ## Release validation matrix
 
@@ -100,7 +92,7 @@ Do not check the remaining Phase 7 roadmap gates until these tests pass.
 | Security | Signed executable/installer validate with `Get-AuthenticodeSignature`; SmartScreen reputation reviewed |
 
 Record the OS build, hardware/VM, display scaling, test result, and any workaround
-in the release notes. CI's offscreen tests and unsigned artifact prove packaging
+in the release notes. Offscreen tests and local unsigned artifacts prove packaging
 repeatability, not real compositor, tray, notification, or DPI behavior.
 
 On each Windows 10/11 validation machine, generate a machine-specific report

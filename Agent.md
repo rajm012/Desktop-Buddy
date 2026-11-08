@@ -6,7 +6,7 @@ This file is the operational handbook for coding agents working in this reposito
 
 Desktop Buddy is a Python 3.10+ / PyQt6 desktop companion. It renders animated characters in a small transparent, always-on-top window and provides local custom reminders, safe quick actions, a focus timer, tray controls, preferences, onboarding, CLI commands, and single-instance IPC.
 
-Current package version: `1.8.0` (Windows preview).
+Current package version: `1.8.0` (Linux release; Windows deferred).
 
 Primary verified release environment: Linux/X11. Linux/Wayland runs in a reduced mode because compositors restrict positioning, active-window inspection, always-on-top behavior, and click-through. Windows now has a native backend and standalone packaging preview, but public support remains gated on signed artifacts and the Windows 10/11 mixed-DPI validation matrix. macOS still uses the generic backend.
 
@@ -21,16 +21,18 @@ Guiding product rules:
 
 ## 2. Current development status
 
-Last verified: 2026-11-03 on branch `main` at commit `609d6ca` plus the
-uncommitted Phase 7 signed-release and validation tooling described below.
+Current release direction: 2026-11-08, Linux-only v1.8.0 built locally on
+Ubuntu 24.04 x86_64. See `docs/RELEASING.md` for build and publish commands.
 
 Repository state at handoff:
 
-- `main` is synchronized with `origin/main`.
-- The working tree contains the uncommitted protected Windows signing workflow,
-  fail-closed build checks, Windows validation-report tool, and their
-  documentation/tests; preserve it unless the user explicitly asks to commit or
-  discard it.
+- Release source is committed on `main` before building; the publisher verifies
+  a clean checkout, the recorded build commit, and all asset checksums.
+- GitHub Actions checks are manual and Linux-only. Pushes, tags and pull
+  requests do not trigger hosted jobs; Windows release workflows are removed.
+- `scripts/build_linux.sh` builds the standalone Linux archive, wheel and source
+  distribution locally. `scripts/release_linux.sh --publish-only` uploads that
+  exact build through GitHub CLI without using Actions minutes.
 - Phase 0 is complete: stable baseline, migrations, CI, renderer/CLI/IPC tests, screenshots, and performance measurements.
 - Phase 1 is complete: platform backend abstraction and Linux/X11 isolation.
 - Phase 2 is complete: tabbed preferences, onboarding, capability status, attention controls, config import/export/reset, and animation previews.
@@ -38,22 +40,26 @@ Repository state at handoff:
 - Phase 4 is complete: general reminders, local schedule parsing, outcome history, safe quick actions, explicit command approval, Preferences/tray integration, and CLI/IPC controls.
 - Phase 5 is complete: plugin API 1, event bus, limited contribution APIs, built-in/external discovery, permissions, failure isolation, and management UI/CLI.
 - Phase 6 is complete: opt-in context polling, app profiles, fullscreen/idle/battery/network events, native media controls, keychain hooks, and a read-only local calendar plugin.
-- Phase 7 engineering is implemented: Win32 backend, autostart, DPI manifest, fullscreen adaptation, packaging, uninstall choice, Windows CI, and automated geometry/service tests.
+- Phase 7 engineering is retained: Win32 backend, autostart, DPI manifest, fullscreen adaptation, packaging, uninstall choice, and automated geometry/service tests. Windows builds and releases are deferred.
 - Phase 7 release gates remain: production signing, real DPI/rendering validation, and Windows 10/11 physical/VM testing.
-- Phases 8 through 11 have not started.
+- Phases 8, 9 and 11 have not started. Phase 10 has local Linux packaging,
+  versioned release notes, build provenance and checksums; its remaining
+  multi-platform, update-checking and signing gates are open.
 
 History is now represented by the Phase 3, Phase 4, and Phase 5 commits ending at
 `87de701`; use the current code and tests rather than the older ambiguous commit
 titles.
 
-Verification at handoff:
+Previous verification (2026-11-03, before the Linux release changes):
 
 - Ruff formatting check: passing.
 - Ruff lint check: passing.
 - Unit/smoke tests: 157 passing.
 - Source distribution and wheel build: passing.
 
-The next roadmap work is Phase 7 Steps 3, 6, and 8: run the signed Windows installer through the physical/VM DPI and lifecycle matrix in `docs/WINDOWS.md`. Do not mark Windows fully supported from Linux-hosted tests alone.
+The current priority is the Linux release and local release maintenance.
+Windows Phase 7 Steps 3, 6, and 8 remain deferred; do not mark Windows fully
+supported from Linux-hosted tests alone.
 
 ## 3. Repository map
 
@@ -72,7 +78,10 @@ The next roadmap work is Phase 7 Steps 3, 6, and 8: run the signed Windows insta
 | `scripts/check.sh` | Canonical formatting, lint, test, and build verification. |
 | `scripts/fetch_qt_syslibs.sh` | Vendors Linux Qt/XCB runtime libraries when needed. |
 | `tools/preview.py` | Renders character/theme pose previews. |
-| `.github/workflows/ci.yml` | Linux CI using Python 3.12. |
+| `.github/workflows/ci.yml` | Optional, manually dispatched Linux checks using Python 3.12. |
+| `scripts/build_linux.sh` | Local verified Linux standalone/source/wheel build. |
+| `scripts/release_linux.sh` | Local build and GitHub CLI publication; no Actions. |
+| `docs/RELEASING.md` | Linux release commands, provenance, and supported baseline. |
 
 ### Application modules
 
@@ -483,14 +492,15 @@ context.
 - Existing config, controller/IPC, Preferences, plugin, and reminder tests cover
   migrations and regression boundaries. The complete suite has 144 tests.
 
-All eight Phase 6 steps and acceptance criteria are checked in `ROADMAP.md`. The
-next handoff is Phase 7: a native Windows backend using the expanded capability
-contract.
+All eight Phase 6 steps and acceptance criteria are checked in `ROADMAP.md`.
+The native Windows backend is retained, with Windows releases deferred while
+Linux is the public release platform.
 
 ## 14. Phase 7 implementation reference
 
-Phase 7 code is implemented as the `1.8.0` Windows preview. Release validation is
-deliberately incomplete until signed artifacts run on Windows 10 and Windows 11.
+Phase 7 code is implemented and retained in the Linux-only `1.8.0` release.
+Windows builds are deferred and release validation remains incomplete until
+signed artifacts run on Windows 10 and Windows 11.
 
 ### Native backend
 
@@ -520,22 +530,21 @@ deliberately incomplete until signed artifacts run on Windows 10 and Windows 11.
   should be preserved or purged.
 - `scripts/build_windows.ps1` optionally signs both executable and installer with
   SHA-256 and a trusted timestamp using protected environment credentials.
-- `.github/workflows/windows-release.yml` provides a manually dispatched,
-  environment-protected signing path that verifies both Authenticode signatures,
-  uploads signed artifacts, and removes temporary certificate material.
+- The hosted Windows signing workflow is removed. Local signing and validation
+  scripts remain available for future Windows work.
 - `scripts/validate_windows_release.ps1` verifies downloaded signed artifacts,
   records machine/display evidence, and generates the manual Windows 10/11 DPI,
   services, IPC, lifecycle, and security checklist used for release approval.
 
 ### CI and validation
 
-- `.github/workflows/ci.yml` has a `windows-latest` job for Ruff, all tests,
-  PyInstaller, packaged-executable smoke, Inno Setup, and unsigned artifacts.
+- `.github/workflows/ci.yml` runs only Linux checks on `workflow_dispatch`.
+  Release builds and checks run locally; no Windows CI artifacts are produced.
 - `tests/test_windows_backend.py` covers capabilities, active-window delegation,
   autostart, native styles, credentials, classification, secondary-monitor
   fullscreen geometry, and backend selection.
 - `tests/test_windows_packaging.py` locks the DPI manifest, windowed PyInstaller
-  build, installer version/data choice, and Windows CI artifact configuration.
+  build, installer version/data choice, and manual Linux-only hosted checks.
 - Linux-hosted tests cannot validate actual transparent rendering, tray shell
   integration, notifications, SmartScreen, mixed-DPI moves, or code signatures.
 - `docs/WINDOWS.md` is the authoritative release matrix. Roadmap Steps 3, 6, and

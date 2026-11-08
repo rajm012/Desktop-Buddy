@@ -15,6 +15,7 @@ dependencies = ["PyQt6>=6.6,<7"]
 [project.optional-dependencies]
 dev = ["build>=1.2,<2", "ruff>=0.8,<1"]
 windows = ["pyinstaller>=6.10,<7"]
+linux-release = ["pyinstaller>=6.10,<7"]
 
 [project.scripts]
 desktop-buddy = "desktop_buddy.app:main"
