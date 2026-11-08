@@ -367,6 +367,10 @@ The supported Phase 0 feature set and known constraints are maintained in
 
 ## Local Linux releases
 
+The download website lives in [`web/`](web/README.md). Deploy that folder to
+Netlify with no build command; the root `netlify.toml` sets the publish directory.
+See [the brief setup steps](web/README.md#netlify).
+
 ```bash
 ./scripts/build_linux.sh                # check and build locally
 ./scripts/release_linux.sh --publish-only  # upload that exact build with gh

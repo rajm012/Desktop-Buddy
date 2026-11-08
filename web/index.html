@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f9f3">
+    <meta name="description" content="Meet Desktop Buddy: a tiny companion for your Linux desktop. Animated characters, gentle reminders, and a local focus timer. Download free for Linux. Windows coming soon.">
+    <meta property="og:title" content="Desktop Buddy — Good company, right on your desktop.">
+    <meta property="og:description" content="A little personality for your Linux desktop. Meet Bolt, Boo-ombastic, and Mochi. Free, open source, and local.">
+    <meta property="og:type" content="website">
+    <title>Desktop Buddy — A little company for your desktop</title>
+    <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="arrow-up-right" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol>
+      <symbol id="download-icon" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+      <symbol id="sparkle-icon" viewBox="0 0 24 24"><path d="m12 2 2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8L12 2Z"/></symbol>
+      <symbol id="clock-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="heart-icon" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></symbol>
+      <symbol id="check-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    </svg>
+
+    <header class="site-header container">
+      <a class="brand" href="#" aria-label="Desktop Buddy home">
+        <img src="assets/icon.svg" width="36" height="36" alt="">
+        <span>desktop buddy<span class="brand-dot">.</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a class="nav-link" href="#buddies">Meet the buddies</a>
+        <a class="nav-link" href="https://github.com/rajm012/Desktop-Buddy">GitHub <svg class="icon"><use href="#arrow-up-right"/></svg></a>
+        <a class="button button-small button-dark" href="#download">Get your buddy <svg class="icon"><use href="#arrow-up-right"/></svg></a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero container" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot"></span> A little friend for your everyday</p>
+          <h1 id="hero-title">Good company.<br>Right on your<br><span class="marked">desktop.</span></h1>
+          <p class="hero-description">A tiny companion that wanders, dances, and reminds you to take a breather. Make your Linux desktop feel a little more alive.</p>
+          <div class="hero-actions">
+            <a class="button button-lime" href="https://github.com/rajm012/Desktop-Buddy/releases/download/v1.8.0/desktop-buddy-1.8.0-linux-x86_64.tar.gz">
+              <svg class="icon"><use href="#download-icon"/></svg> Download for Linux
+            </a>
+            <span class="version-note">v1.8.0 <span>·</span> Free &amp; open source</span>
+          </div>
+          <p class="platform-note">Ubuntu 24.04+ <span>·</span> x86_64 <span>·</span> Windows coming soon</p>
+        </div>
+
+        <div class="hero-art">
+          <div class="art-caption"><span class="caption-line"></span> A small friend. A big personality.</div>
+          <div class="desktop-preview" aria-label="Interactive character preview, an illustration of Desktop Buddy on a desktop">
+            <div class="desktop-bar"><span class="desktop-menu">Activities</span><span>Mon, 9:41</span><span class="desktop-signals" aria-hidden="true">◒ &nbsp; ▰</span></div>
+            <div class="desktop-orb orb-one"></div><div class="desktop-orb orb-two"></div>
+            <div class="notes-window" aria-hidden="true">
+              <div class="window-bar"><span class="window-dots"><i></i><i></i><i></i></span><span>A good day.txt</span><span>↗</span></div>
+              <div class="note-content"><span class="note-date">A LITTLE PLAN FOR TODAY</span><p>Make something nice.</p><div class="note-line"><span class="checked">✓</span> Take it one step at a time</div><div class="note-line"><span class="unchecked"></span> Remember to stretch</div><div class="note-line"><span class="unchecked"></span> Enjoy the little things</div><div class="note-rule"></div><span class="note-scribble">You've got this.</span></div>
+            </div>
+            <div class="speech-bubble" id="buddy-speech">Hey, I'm Bolt. Nice to meet you!</div>
+            <img class="preview-buddy" id="preview-buddy" src="assets/robot-idle.png" width="336" height="384" alt="Bolt, a small white robot with a dark screen face and bright eyes">
+            <div class="preview-shadow" aria-hidden="true"></div>
+            <div class="desktop-dock" aria-hidden="true"><span class="dock-icon dock-files">▰</span><span class="dock-icon dock-web">◎</span><span class="dock-icon dock-terminal">›_</span><img src="assets/icon.svg" width="29" height="29" alt=""><span class="dock-icon dock-grid">⠿</span></div>
+            <span class="preview-label">A peek at your new desk mate</span>
+          </div>
+          <div class="preview-controls">
+            <span class="preview-hint"><svg class="icon"><use href="#sparkle-icon"/></svg> A little preview</span>
+            <div class="mood-controls" role="group" aria-label="Preview a buddy animation pose">
+              <button class="mood-button active" type="button" data-mood="idle" aria-pressed="true">Say hi</button>
+              <button class="mood-button" type="button" data-mood="dance" aria-pressed="false">Dance</button>
+              <button class="mood-button" type="button" data-mood="sleep" aria-pressed="false">Nap</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="trust-strip container" aria-label="Desktop Buddy benefits">
+        <span><svg class="icon"><use href="#check-icon"/></svg> No accounts. No subscriptions.</span>
+        <span><svg class="icon"><use href="#check-icon"/></svg> Your data stays on your device.</span>
+        <span><svg class="icon"><use href="#check-icon"/></svg> A little joy, without the noise.</span>
+      </div>
+
+      <section class="buddies-section container" id="buddies" aria-labelledby="buddies-title">
+        <div class="section-heading"><div><p class="eyebrow">Pick your kind of company</p><h2 id="buddies-title">Three buddies. All personality.</h2></div><p>Switch characters whenever you like.<br>They all come with the app.</p></div>
+        <div class="buddy-grid" role="group" aria-label="Choose a character for the desktop preview">
+          <button class="buddy-card selected" type="button" data-character="robot" aria-pressed="true">
+            <div class="buddy-card-top"><span class="character-type">THE LITTLE ROBOT</span><span class="selection-marker" aria-hidden="true">↗</span></div>
+            <div class="buddy-portrait portrait-robot"><img src="assets/robot-idle.png" width="336" height="384" alt="Bolt the robot" loading="lazy"><span class="portrait-sparkle" aria-hidden="true">✳</span></div>
+            <div class="buddy-card-bottom"><h3>Bolt<span>01</span></h3><p>Bright eyes. Curious feet.<br>Always happy to keep you company.</p><span class="select-label">In the desktop preview <span aria-hidden="true">↗</span></span></div>
+          </button>
+          <button class="buddy-card" type="button" data-character="ghost" aria-pressed="false">
+            <div class="buddy-card-top"><span class="character-type">THE FRIENDLY GHOST</span><span class="selection-marker" aria-hidden="true">↗</span></div>
+            <div class="buddy-portrait portrait-ghost"><img src="assets/ghost-idle.png" width="336" height="384" alt="Boo-ombastic the ghost" loading="lazy"><span class="portrait-sparkle" aria-hidden="true">✧</span></div>
+            <div class="buddy-card-bottom"><h3>Boo-ombastic<span>02</span></h3><p>A soft little spirit.<br>Big on dancing. Small on scares.</p><span class="select-label">Preview this buddy <span aria-hidden="true">↗</span></span></div>
+          </button>
+          <button class="buddy-card" type="button" data-character="mochi" aria-pressed="false">
+            <div class="buddy-card-top"><span class="character-type">THE ORIGINAL BLOB-CAT</span><span class="selection-marker" aria-hidden="true">↗</span></div>
+            <div class="buddy-portrait portrait-mochi"><img src="assets/mochi-idle.png" width="336" height="384" alt="Mochi the cat" loading="lazy"><span class="portrait-sparkle" aria-hidden="true">✿</span></div>
+            <div class="buddy-card-bottom"><h3>Mochi<span>03</span></h3><p>A cozy, squishy companion.<br>Perfectly content just being here.</p><span class="select-label">Preview this buddy <span aria-hidden="true">↗</span></span></div>
+          </button>
+        </div>
+        <p class="preview-announcement sr-only" id="preview-announcement" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="features-section container" aria-labelledby="features-title">
+        <div class="section-heading"><div><p class="eyebrow">More than a cute face</p><h2 id="features-title">Little things that help your day.</h2></div></div>
+        <div class="features-grid">
+          <article class="feature"><span class="feature-icon feature-mint"><svg class="icon"><use href="#sparkle-icon"/></svg></span><h3>A desktop with personality</h3><p>Walk, jump, dance, and perch on your windows. Drag your buddy anywhere and let it settle in.</p></article>
+          <article class="feature"><span class="feature-icon feature-peach"><svg class="icon"><use href="#heart-icon"/></svg></span><h3>A gentle nudge to take care</h3><p>Set your own reminders to drink water, stretch, or step away. Snooze when you need a little more time.</p></article>
+          <article class="feature"><span class="feature-icon feature-lilac"><svg class="icon"><use href="#clock-icon"/></svg></span><h3>Room to focus, too</h3><p>A local focus timer, break sessions, and quiet controls. Your buddy knows when to give you some space.</p></article>
+        </div>
+        <div class="local-note"><span class="local-note-symbol" aria-hidden="true">⌁</span><p><strong>Your desktop. Your little world.</strong> Settings, reminders, and focus history stay on your device. Integrations are opt-in.</p><span class="local-note-tag">LOCAL BY DEFAULT</span></div>
+      </section>
+
+      <section class="download-section container" id="download" aria-labelledby="download-title">
+        <div class="download-heading"><p class="eyebrow">A new friend is one download away</p><h2 id="download-title">Make a little room<br>on your desktop.</h2><p>Free to download. Easy to make your own.</p></div>
+        <div class="download-grid">
+          <article class="download-card linux-card">
+            <div class="download-card-top"><span class="os-label"><span class="os-glyph" aria-hidden="true">›_</span> Linux</span><span class="release-badge"><span class="status-dot"></span> Available now</span></div>
+            <h3>Meet your new buddy.</h3><p>Version 1.8.0 <span>·</span> Standalone archive <span>·</span> ~75 MB</p>
+            <a class="button button-dark download-button" href="https://github.com/rajm012/Desktop-Buddy/releases/download/v1.8.0/desktop-buddy-1.8.0-linux-x86_64.tar.gz"><svg class="icon"><use href="#download-icon"/></svg> Download for Linux <span class="download-extension">.tar.gz</span></a>
+            <p class="system-requirements">Ubuntu 24.04+ or compatible Linux · x86_64 · glibc 2.39+<br>Python and Qt included. X11 recommended.</p>
+            <a class="text-link" href="https://github.com/rajm012/Desktop-Buddy/releases/tag/v1.8.0">Release notes &amp; checksums <svg class="icon"><use href="#arrow-up-right"/></svg></a>
+          </article>
+          <article class="download-card windows-card">
+            <div class="download-card-top"><span class="os-label"><span class="windows-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Windows</span><span class="coming-badge">Coming soon</span></div>
+            <h3>Good company is on its way.</h3><p>Windows support is in development. There isn't a Windows download just yet.</p>
+            <span class="windows-placeholder"><svg class="icon"><use href="#clock-icon"/></svg> A little more time, a little more care.</span>
+            <a class="text-link" href="https://github.com/rajm012/Desktop-Buddy/blob/main/ROADMAP.md">Follow the project <svg class="icon"><use href="#arrow-up-right"/></svg></a>
+          </article>
+        </div>
+        <div class="install-guide">
+          <div class="install-copy"><span class="step-tag">NEXT, SAY HELLO</span><h3>Unpack. Install. Enjoy.</h3><p>Extract the archive and run <code>./install.sh</code> to add your buddy to the application menu and start it at login. No Python setup needed.</p><p class="install-alternative">Just trying it out? Run <code>./desktop-buddy</code> from the extracted folder.</p></div>
+          <div class="terminal"><div class="terminal-heading"><span>Quick start</span><button class="copy-button" id="copy-install" type="button" hidden>Copy commands</button></div><pre><code id="install-commands">tar -xzf desktop-buddy-1.8.0-linux-x86_64.tar.gz
+cd desktop-buddy
+./install.sh</code></pre><p class="terminal-note">Add <code>--no-autostart</code> to skip login startup.</p><span class="sr-only" id="copy-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <p class="wayland-note"><strong>Using Wayland?</strong> The buddy runs with reduced positioning, perching, and click-through. Use an X11 session for the full experience. <a href="https://github.com/rajm012/Desktop-Buddy#wayland">See Linux tips <span aria-hidden="true">↗</span></a></p>
+      </section>
+    </main>
+
+    <footer class="site-footer container"><a class="brand" href="#"><img src="assets/icon.svg" width="30" height="30" alt=""><span>desktop buddy<span class="brand-dot">.</span></span></a><p>A little company goes a long way.</p><div><a href="https://github.com/rajm012/Desktop-Buddy">Source code <svg class="icon"><use href="#arrow-up-right"/></svg></a><a href="https://github.com/rajm012/Desktop-Buddy/issues">Say hello / report a bug <svg class="icon"><use href="#arrow-up-right"/></svg></a></div></footer>
+  </body>
+</html>
