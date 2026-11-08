@@ -2,6 +2,9 @@
 
 Static HTML/CSS/JavaScript. Downloads link directly to the published GitHub
 release; the Linux archive is not copied to Netlify. No build or dependencies.
+Light and dark themes follow the device preference until a visitor uses the
+header switch; their choice is saved locally in the browser. GitHub links invite
+visitors to star, fork and reuse the project.
 
 ## Netlify
 
